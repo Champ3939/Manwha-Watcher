@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manhwa Watcher v1.1.0</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow" id="versionLabel">v1.1.0 · Stable</div>
+      <h1>Manhwa Watcher</h1>
+      <p>Quelle auswählen, einzelne Serien laden oder einen kompletten Katalog als CBZ-Archiv herunterladen.</p>
+    </div>
+    <div class="header-actions">
+      <button id="updateScanBtn" class="accent">Updates scannen</button>
+      <button id="newsToggleBtn" class="secondary">Neuheiten</button>
+      <button id="phoneSyncToggleBtn" class="secondary">Handy-Sync</button>
+      <button id="websitesToggleBtn" class="secondary">Webseiten</button>
+      <button id="labToggleBtn" class="secondary">Connector-Labor</button>
+      <button id="downloadsToggleBtn" class="secondary">Downloads</button>
+      <button id="libraryToggleBtn" class="secondary">Bibliothek</button>
+      <button id="queueToggleBtn" class="secondary">Queue</button>
+      <button id="backupToggleBtn" class="secondary">Backup</button>
+      <button id="debugToggleBtn" class="secondary">Debug-Log</button>
+      <button id="openFolderBtn" class="accent">Downloadordner</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="settings-card">
+      <label><input type="checkbox" id="autoCheck" /> Watch-Library automatisch prüfen</label>
+      <label>Intervall <input type="number" id="interval" min="1" value="30" /> Minuten</label>
+      <label>Request-Pause <input type="number" id="requestDelay" min="0" step="50" value="350" /> ms</label>
+      <label><input type="checkbox" id="notifications" /> Benachrichtigungen</label>
+      <span class="schedule-group"><strong>Auto-Updates</strong><label><input type="checkbox" id="autoUpdateScan" /> aktiv</label><label>alle <input type="number" id="updateIntervalHours" min="1" max="168" value="6" /> h</label><label><input type="checkbox" id="updateScanOnStartup" /> beim Start</label></span>
+      <span class="language-filter-group"><strong>Download-Sprachen</strong><label><input type="checkbox" id="langEn" checked /> EN</label><label><input type="checkbox" id="langDe" checked /> DE</label><label title="Nur aktivieren, wenn eine Quelle keine Sprachinformation liefert"><input type="checkbox" id="langUnknown" /> ? erlauben</label></span>
+      <button id="folderBtn" class="secondary">Ordner wählen</button>
+      <input id="folderPath" type="text" spellcheck="false" aria-label="Downloadordner" title="Downloadordner kann auch direkt eingetragen werden" />
+      <button id="applyFolderBtn" class="secondary">Übernehmen</button>
+    </section>
+
+    <section class="engine-card">
+      <div>
+        <strong>Browser Engine</strong>
+        <span id="engineState" class="pill">nicht getestet</span>
+        <div id="connectorSummary" class="subtle">Connectoren werden geladen …</div>
+      </div>
+      <div class="engine-actions">
+        <button id="browserTestBtn" class="secondary">Browser testen</button>
+        <button id="connectorFolderBtn" class="secondary">Connector-Ordner</button>
+        <button id="reloadConnectorsBtn" class="secondary">Connectoren neu laden</button>
+      </div>
+    </section>
+
+    <section id="browsePanel" class="hakuneko-panel">
+      <div class="panel-head browser-head">
+        <div>
+          <div class="eyebrow">Browser</div>
+          <h2>Serien & Kapitel</h2>
+          <p>Wie bei HakuNeko: Quelle wählen → Serie wählen → Kapitel herunterladen. Das Connector-Labor brauchst du nur zum Einrichten neuer Quellen.</p>
+        </div>
+        <span id="browseState" class="pill">bereit</span>
+      </div>
+
+      <div class="catalog-toolbar">
+        <label class="field source-picker">Quelle
+          <select id="sourceSelect"><option value="">Connector auswählen …</option></select>
+        </label>
+        <label class="field catalog-url">Katalog-URL
+          <div class="inline-field catalog-url-actions"><input id="browseUrl" type="url" placeholder="https://example.org/" /><button id="browseLoadBtn">Alle Serien neu laden</button><button id="saveCurrentWebsiteBtn" class="secondary">Speichern</button><button id="downloadSiteBtn" class="bulk-download" disabled>Ganze Quelle herunterladen</button></div>
+        </label>
+        <label class="field catalog-search">Serien suchen
+          <div class="inline-field catalog-search-actions"><input id="browseSearch" type="search" autocomplete="off" placeholder="Gesamten Katalog durchsuchen …" /><button id="downloadFilteredBtn" class="secondary" type="button" disabled>Treffer herunterladen</button></div>
+        </label>
+      </div>
+
+      <div class="series-status-filter" aria-label="Serienstatus filtern">
+        <strong>Status</strong>
+        <label class="status-toggle status-ongoing"><input id="status-ongoing" type="checkbox" checked /> Ongoing</label>
+        <label class="status-toggle status-completed"><input id="status-completed" type="checkbox" checked /> Completed</label>
+        <label class="status-toggle status-hiatus"><input id="status-hiatus" type="checkbox" checked /> Hiatus</label>
+        <label class="status-toggle status-upcoming"><input id="status-upcoming" type="checkbox" checked /> Upcoming</label>
+        <label class="status-toggle status-cancelled"><input id="status-cancelled" type="checkbox" /> Cancelled</label>
+        <label class="status-toggle status-dropped"><input id="status-dropped" type="checkbox" /> Dropped</label>
+        <label class="status-toggle status-unknown"><input id="status-unknown" type="checkbox" checked /> Unbekannt</label>
+        <button id="statusScanBtn" class="secondary" type="button">Status prüfen</button>
+        <button id="statusDebugBtn" class="secondary" type="button">Status-Debug</button>
+        <label class="status-toggle list-filter"><input id="favoritesOnly" type="checkbox" /> ★ Favoriten</label>
+        <label class="status-toggle list-filter"><input id="readingOnly" type="checkbox" /> 📖 Leseliste</label>
+        <span id="statusFilterMeta" class="subtle">0 sichtbar</span>
+      </div>
+
+      <div id="statusDebugCard" class="status-debug-card hidden">
+        <div class="status-debug-head"><strong>Status-Debug</strong><button id="statusDebugCloseBtn" class="secondary" type="button">Schließen</button></div>
+        <pre id="statusDebugOutput">Noch keine Diagnose ausgeführt.</pre>
+      </div>
+
+      <div class="browser-meta"><span id="browseMeta" class="subtle">Wähle links einen eingerichteten Connector oder gib eine Katalog-URL ein.</span></div>
+
+      <div id="siteDownloadPanel" class="site-download-card hidden">
+        <div class="site-download-copy">
+          <strong id="siteDownloadTitle">Serien-Batch-Download</strong>
+          <span id="siteDownloadProgress">Bereit.</span>
+          <small id="siteDownloadMeta">Vorhandene CBZs werden übersprungen. Serien und Kapitel werden nacheinander geladen.</small>
+        </div>
+        <div class="site-download-actions">
+          <button id="sitePauseBtn" class="secondary" disabled>Pause</button>
+          <button id="siteCancelBtn" class="danger" disabled>Abbrechen</button>
+        </div>
+      </div>
+
+      <div class="hakuneko-columns">
+        <aside class="hk-column sources-column">
+          <div class="column-head"><strong>Quellen</strong><small id="sourceCount">0</small></div>
+          <div id="sourceList" class="source-list"><div class="empty compact">Noch keine Web-Connectoren.</div></div>
+        </aside>
+
+        <section class="hk-column titles-column">
+          <div class="column-head"><strong>Serien</strong><small id="catalogCount">0</small></div>
+          <div id="browseResults" class="title-list"><div class="empty compact">Noch keine Serienliste geladen.</div></div>
+        </section>
+
+        <section class="hk-column chapters-column">
+          <div class="selected-series-head">
+            <div>
+              <div class="column-head"><strong id="selectedSeriesTitle">Kapitel</strong><small id="selectedChapterCount">0</small></div>
+              <div id="selectedSeriesMeta" class="subtle">Wähle zuerst eine Serie aus der mittleren Liste.</div>
+            </div>
+            <div class="selected-series-actions">
+              <button id="favoriteSelectedBtn" class="secondary" disabled>☆ Favorit</button>
+              <button id="readingSelectedBtn" class="secondary" disabled>📖 Leseliste</button>
+              <button id="watchSelectedBtn" class="secondary" disabled>Beobachten</button>
+              <button id="syncSelectedBtn" class="secondary" disabled>📱 Sync</button>
+              <button id="labSelectedBtn" class="secondary" disabled>Connector</button>
+            </div>
+          </div>
+          <div class="chapter-toolbar">
+            <input id="chapterSearch" type="text" placeholder="Kapitel suchen …" />
+            <button id="chapterSelectAllBtn" class="secondary" disabled>Alle</button>
+            <button id="chapterSelectNoneBtn" class="secondary" disabled>Keine</button>
+            <button id="downloadSelectedBtn" disabled>Ausgewählte herunterladen</button>
+            <button id="downloadAllBtn" class="secondary" disabled>Alle herunterladen</button>
+            <label class="chapter-filter"><input id="hideDownloaded" type="checkbox" /> Nur offen</label>
+          </div>
+          <div id="catalogChapterState" class="catalog-chapter-state">Noch keine Serie geöffnet.</div>
+          <div id="catalogChapters" class="catalog-chapters"><div class="empty compact">Kapitel erscheinen hier.</div></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="phoneSyncPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div>
+          <div class="eyebrow">Handy-Sync</div>
+          <h2>Syncthing → Aniyomi</h2>
+          <div class="subtle">Markierte Serien werden als CBZ in einen separaten Sync-Ordner gespiegelt. Neue Downloads werden automatisch nachkopiert.</div>
+        </div>
+        <div class="engine-actions">
+          <button id="runPhoneSyncBtn" class="accent">Jetzt synchronisieren</button>
+          <button id="closePhoneSyncBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div class="phone-sync-settings">
+        <div class="phone-sync-path">
+          <strong>PC-Sync-Ordner</strong>
+          <span id="phoneSyncPath">Noch nicht ausgewählt.</span>
+          <small>Diesen Ordner in Syncthing freigeben und auf Android direkt mit dem <code>local</code>-Ordner deiner Aniyomi-Speicherposition verbinden.</small>
+        </div>
+        <button id="choosePhoneSyncFolderBtn" class="secondary">Ordner wählen</button>
+        <button id="openPhoneSyncFolderBtn" class="secondary">Ordner öffnen</button>
+      </div>
+      <div id="phoneSyncProgress" class="update-progress">Bereit.</div>
+      <div class="phone-sync-head"><strong>Für Handy-Sync markierte Serien</strong><small id="phoneSyncCount">0</small></div>
+      <div id="phoneSyncSeriesList" class="phone-sync-list"><div class="empty compact">Noch keine Serien markiert. Öffne eine Serie und klicke rechts oben auf „📱 Sync“.</div></div>
+    </section>
+
+    <section id="labPanel" class="lab-panel hidden">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Connector-Labor</div>
+          <h2>Web-Connector erstellen & testen</h2>
+          <p>DOM analysieren, Elemente direkt im Browser anklicken und CSS-Selektoren als Recipe speichern.</p>
+        </div>
+        <button id="closeLabBtn" class="secondary">Schließen</button>
+      </div>
+
+      <div class="lab-grid top-grid">
+        <label class="field wide">Serien-URL
+          <div class="inline-field"><input id="labUrl" type="url" placeholder="https://comics.example.org/series/name" /><button id="labLoadBtn">URL laden</button></div>
+        </label>
+        <label class="field">Domain<input id="labDomain" type="text" placeholder="comics.example.org" /></label>
+        <label class="field">Connector-ID<input id="labId" type="text" placeholder="my-site" /></label>
+        <label class="field">Name<input id="labLabel" type="text" placeholder="My Site" /></label>
+      </div>
+
+      <div class="lab-toolbar">
+        <span id="labPageState" class="pill">keine Seite geladen</span>
+        <button id="showBrowserBtn" class="secondary">Browser anzeigen</button>
+        <button id="hideBrowserBtn" class="secondary">Browser verstecken</button>
+        <button id="restartBrowserBtn" class="secondary">Browser neu starten</button>
+        <button id="analyzePageBtn" class="accent-soft">Seite analysieren</button>
+        <button id="clearHighlightsBtn" class="secondary">Markierungen löschen</button>
+        <button id="devToolsBtn" class="secondary">DevTools</button>
+        <button id="clearBrowserDataBtn" class="secondary">Site-Daten löschen</button>
+      </div>
+      <section id="analysisPanel" class="analysis-card hidden">
+        <div class="analysis-head">
+          <div>
+            <strong>Automatische DOM-Analyse</strong>
+            <div id="analysisMeta" class="subtle">Noch nicht analysiert.</div>
+          </div>
+          <span class="pill" id="analysisState">bereit</span>
+        </div>
+        <div class="analysis-columns">
+          <div><h4>Titel-Vorschläge</h4><div id="titleSuggestions" class="suggestion-list"></div></div>
+          <div><h4>Kapitel-Vorschläge</h4><div id="chapterSuggestions" class="suggestion-list"></div></div>
+          <div><h4>Bild-Vorschläge</h4><div id="pageSuggestions" class="suggestion-list"></div></div>
+        </div>
+      </section>
+
+      <div class="lab-columns">
+        <section class="lab-section">
+          <h3>1. Serientitel</h3>
+          <label class="field">Titel-Selektor <span class="subtle">(optional – automatische Titelerkennung ist aktiv)</span><input id="titleSelector" type="text" placeholder="optional, z. B. h1" /></label>
+          <div class="button-row">
+            <button id="pickTitleBtn" class="accent-soft">Im Browser wählen</button>
+            <button id="testTitleBtn" class="secondary">Titel testen</button>
+            <button id="highlightTitleBtn" class="secondary">Markieren</button>
+          </div>
+          <div id="titleResult" class="result-box muted">Noch nicht getestet.</div>
+        </section>
+
+        <section class="lab-section">
+          <h3>2. Kapitel</h3>
+          <label class="field">Kapitel-Selektor<input id="chapterSelector" type="text" placeholder="a.chapter-link" /></label>
+          <label class="field">Titel innerhalb des Elements<input id="chapterTitleSelector" type="text" placeholder=".chapter-title (optional)" /></label>
+          <label class="field">URL-Element<input id="chapterUrlSelector" type="text" placeholder="leer = Kapitel-Element selbst" /></label>
+          <label class="field">URL-Attribute<input id="chapterUrlAttributes" type="text" value="href" /></label>
+          <label class="field">Reihenfolge
+            <select id="chapterOrder"><option value="number-asc">Nummer aufsteigend</option><option value="number-desc">Nummer absteigend</option><option value="reverse-dom">DOM umdrehen</option><option value="dom">DOM-Reihenfolge</option></select>
+          </label>
+          <label class="field">Nummer-RegEx<input id="numberRegex" type="text" value="(?:chapter|ch\.?)[ \t]*([0-9]+(?:[.,][0-9]+)?)" /></label>
+          <div class="button-row">
+            <button id="pickChaptersBtn" class="accent-soft">Kapitel anklicken</button>
+            <button id="testChaptersBtn" class="secondary">Kapitel testen</button>
+            <button id="highlightChaptersBtn" class="secondary">Markieren</button>
+          </div>
+          <div id="chapterResult" class="result-box muted">Noch nicht getestet.</div>
+        </section>
+
+        <section class="lab-section">
+          <h3>3. Reader-Seiten</h3>
+          <label class="field">Kapitel-/Reader-URL<input id="pageTestUrl" type="url" placeholder="wird nach Kapiteltest automatisch gefüllt" /></label>
+          <label class="field">Bild-Selektor<input id="pageSelector" type="text" placeholder=".reader img" /></label>
+          <label class="field">URL-Element<input id="pageUrlSelector" type="text" placeholder="leer = Bild-Element selbst" /></label>
+          <label class="field">Bild-URL-Attribute<input id="pageUrlAttributes" type="text" value="src, data-src, data-lazy-src, data-original" /></label>
+          <label class="field">Wait-for-Selektor<input id="pageWaitForSelector" type="text" placeholder="optional, z. B. .reader img" /></label>
+          <div class="button-row">
+            <button id="pickPagesBtn" class="accent-soft">Bild anklicken</button>
+            <button id="testPagesBtn" class="secondary">Seiten testen</button>
+            <button id="highlightPagesBtn" class="secondary">Markieren</button>
+          </div>
+          <div id="pageResult" class="result-box muted">Noch nicht getestet.</div>
+        </section>
+      </div>
+
+      <div class="save-card">
+        <div>
+          <strong>Connector speichern</strong>
+          <div class="subtle">Erzeugt eine JSON-Datei im Connector-Ordner und lädt sie sofort neu.</div>
+        </div>
+        <label class="toggle"><input id="overwriteConnector" type="checkbox" /> vorhandenen Connector überschreiben</label>
+        <label class="compact-field">Settle<input id="settleMs" type="number" min="0" max="10000" value="400" /> ms</label>
+        <label class="compact-field">Timeout<input id="timeoutMs" type="number" min="3000" max="120000" value="30000" /> ms</label>
+        <button id="saveConnectorBtn">Connector speichern</button>
+      </div>
+    </section>
+
+
+
+
+    <section id="websitesPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div>
+          <div class="eyebrow">Quellenverwaltung</div>
+          <h2>Gespeicherte Webseiten</h2>
+          <div class="subtle">Katalogseiten dauerhaft speichern und später mit einem Klick öffnen.</div>
+        </div>
+        <div class="engine-actions">
+          <button id="closeWebsitesBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div class="website-editor">
+        <label class="field">Name<input id="websiteName" type="text" placeholder="z. B. Meine Manga-Seite" /></label>
+        <label class="field website-url-field">Katalog-URL<input id="websiteUrl" type="url" placeholder="https://example.org/manga/" /></label>
+        <button id="saveWebsiteBtn">Webseite speichern</button>
+        <button id="cancelWebsiteEditBtn" class="secondary hidden">Abbrechen</button>
+      </div>
+      <div id="websiteList" class="website-list"><div class="empty compact">Noch keine Webseiten gespeichert.</div></div>
+    </section>
+
+    <section id="updatesPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div>
+          <div class="eyebrow">Update-Scan</div>
+          <h2>Serien aktualisieren</h2>
+          <div id="updateSummary" class="subtle">Noch kein Scan durchgeführt.</div>
+        </div>
+        <div class="engine-actions">
+          <button id="updateScanAgainBtn" class="accent">Erneut scannen</button>
+          <button id="closeUpdatesBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div id="updateProgress" class="update-progress">Bereit.</div>
+      <div id="updateResults" class="update-results"><div class="empty compact">Beim Scan werden alle bereits heruntergeladenen oder beobachteten Serien geprüft. Neue Kapitel werden automatisch als CBZ nachgeladen.</div></div>
+    </section>
+
+
+    <section id="newsPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div>
+          <div class="eyebrow">Neuheiten-Dashboard</div>
+          <h2>Neue Kapitel seit dem letzten Scan</h2>
+          <div id="newsSummary" class="subtle">Noch kein Update-Scan durchgeführt.</div>
+        </div>
+        <div class="engine-actions">
+          <button id="newsScanBtn" class="accent">Jetzt Updates scannen</button>
+          <button id="closeNewsBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div class="news-toolbar">
+        <span id="newsLastScan" class="pill">kein Scan</span>
+        <span class="subtle">Zeigt nur Serien, bei denen der letzte Update-Scan neue Kapitel gefunden hat.</span>
+      </div>
+      <div id="newsList" class="news-list"><div class="empty compact">Nach dem nächsten Update-Scan erscheinen neue Kapitel hier.</div></div>
+    </section>
+
+    <section id="downloadsPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div><div class="eyebrow">Downloadverlauf</div><h2>Heruntergeladene Kapitel</h2><div class="subtle">Wird dauerhaft gespeichert – auch für Serien, die nicht beobachtet werden.</div></div>
+        <div class="engine-actions">
+          <button id="refreshDownloadsBtn" class="secondary">Aktualisieren</button>
+          <button id="closeDownloadsBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div id="downloadsList" class="downloads-list"><div class="empty compact">Noch keine Downloads gespeichert.</div></div>
+    </section>
+
+    <section id="libraryPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div>
+          <div class="eyebrow">Bibliothek & Speicher</div>
+          <h2>Speicherübersicht & Integritätsprüfung</h2>
+          <div id="libraryHealthSummary" class="subtle">Noch nicht geprüft.</div>
+        </div>
+        <div class="engine-actions">
+          <button id="refreshLibraryStatsBtn" class="secondary">Speicher aktualisieren</button>
+          <button id="deepLibraryScanBtn" class="accent">Bibliothek prüfen</button>
+          <button id="repairLibraryBtn" class="accent">Probleme beheben</button>
+          <button id="closeLibraryBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div id="libraryScanProgress" class="update-progress">Bereit.</div>
+      <div id="libraryRepairSummary" class="repair-summary hidden"></div>
+      <div class="library-stat-grid">
+        <div class="library-stat-card"><span>Serien</span><strong id="librarySeriesStat">–</strong><small id="librarySeriesMeta">Downloadordner</small></div>
+        <div class="library-stat-card"><span>CBZs</span><strong id="libraryCbzStat">–</strong><small id="libraryCbzMeta">Kapitelarchive</small></div>
+        <div class="library-stat-card"><span>Bibliothek</span><strong id="libraryBytesStat">–</strong><small id="libraryDiskPath">–</small></div>
+        <div class="library-stat-card"><span>Freier Speicher</span><strong id="libraryFreeStat">–</strong><small id="libraryDiskTotal">Laufwerk</small></div>
+        <div class="library-stat-card"><span>Handy-Sync</span><strong id="syncBytesStat">–</strong><small id="syncStorageMeta">kein Sync-Ordner</small></div>
+        <div class="library-stat-card problem-card"><span>Probleme</span><strong id="libraryIssueStat">–</strong><small id="libraryIssueMeta">tiefe Prüfung erforderlich</small></div>
+      </div>
+      <div class="storage-meter-wrap">
+        <div class="storage-meter-head"><strong>Download-Laufwerk</strong><span id="libraryDiskUsageText">–</span></div>
+        <div class="storage-meter"><span id="libraryDiskUsageBar"></span></div>
+      </div>
+      <div class="library-health-columns">
+        <section class="library-health-box">
+          <div class="library-box-head"><strong>Größte Serien</strong><span class="subtle">nach belegtem Speicher</span></div>
+          <div id="largestSeriesList" class="library-list"><div class="empty compact">Noch keine Daten.</div></div>
+        </section>
+        <section class="library-health-box">
+          <div class="library-box-head"><strong>Probleme</strong><span class="subtle">beschädigt, unvollständig, Metadaten oder Lücken</span></div>
+          <div id="libraryProblemsList" class="library-list"><div class="empty compact">Starte „Bibliothek prüfen“ für eine tiefe Prüfung.</div></div>
+        </section>
+      </div>
+      <div class="backup-note">„Probleme beheben“ repariert nur sicher erkennbare Fälle: unvollständige .part-Dateien, ComicInfo.xml, beschädigte CBZs mit Downloadverlauf und eindeutig gefundene Chapter-Lücken. Vorhandene funktionierende CBZs werden nicht gelöscht.</div>
+    </section>
+
+    <section id="queuePanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div><div class="eyebrow">Download-Queue</div><h2>Warteschlange</h2><div class="subtle">Aktuelle, wartende, fertige und fehlgeschlagene Kapitel dieser Sitzung.</div></div>
+        <div class="engine-actions">
+          <button id="refreshQueueBtn" class="secondary">Aktualisieren</button>
+          <button id="clearQueueBtn" class="secondary">Fertige leeren</button>
+          <button id="closeQueueBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div id="queueSummary" class="update-progress">Bereit.</div>
+      <div id="queueList" class="queue-list"><div class="empty compact">Noch keine Downloadjobs in dieser Sitzung.</div></div>
+    </section>
+
+    <section id="backupPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div><div class="eyebrow">Backup & Restore</div><h2>Manhwa-Watcher-Daten sichern</h2><div class="subtle">Sichert Einstellungen, Webseiten, Downloadverlauf, Sync-Auswahl, Statuscache und Connector-Rezepte – nicht die großen CBZ-Dateien selbst.</div></div>
+        <div class="engine-actions">
+          <button id="exportBackupBtn" class="accent">Backup exportieren</button>
+          <button id="restoreBackupBtn" class="secondary">Backup wiederherstellen</button>
+          <button id="closeBackupBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div id="backupState" class="update-progress">Bereit.</div>
+      <div class="backup-note">Vor einer Wiederherstellung legt Manhwa Watcher automatisch eine Sicherheitskopie der aktuellen <code>library.json</code> an.</div>
+    </section>
+
+    <section id="debugPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div><div class="eyebrow">Diagnose</div><h2>Debug-Log</h2></div>
+        <div class="engine-actions">
+          <button id="refreshLogBtn" class="secondary">Aktualisieren</button>
+          <button id="openLogFolderBtn" class="secondary">Log-Ordner</button>
+          <button id="clearLogBtn" class="danger">Leeren</button>
+          <button id="closeDebugBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div id="debugLog" class="debug-log">Noch keine Einträge.</div>
+    </section>
+
+
+    <div id="status" class="status">Bereit.</div>
+
+    <section class="watched-section">
+      <div class="section-title-row">
+        <div><div class="eyebrow">Watcher</div><h2>Beobachtete Serien</h2><p class="subtle">Nur Serien, bei denen du automatische Prüfungen/Downloads möchtest.</p></div>
+      </div>
+      <section id="seriesList" class="series-list"></section>
+    </section>
+  </main>
+
+  <template id="seriesTemplate">
+    <article class="series-card">
+      <div class="series-head">
+        <div>
+          <h2 class="title"></h2>
+          <div class="meta"></div>
+          <div class="series-error"></div>
+        </div>
+        <div class="actions">
+          <label class="toggle"><input class="autoDownload" type="checkbox" /> Auto-Download</label>
+          <button class="lab secondary">Connector testen</button>
+          <button class="check secondary">Jetzt prüfen</button>
+          <button class="remove danger">Entfernen</button>
+        </div>
+      </div>
+      <div class="chapters"></div>
+    </article>
+  </template>
+  <script src="app.js"></script>
+</body>
+</html>
