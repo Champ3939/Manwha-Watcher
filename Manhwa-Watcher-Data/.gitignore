@@ -1,0 +1,4 @@
+# Keep this directory in Git, but never commit runtime/user data.
+*
+!.gitignore
+!README.md

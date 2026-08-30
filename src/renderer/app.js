@@ -175,6 +175,9 @@ let siteDownloadRunning = false;
 let siteDownloadPaused = false;
 let phoneSyncStatus = { root: '', targetCount: 0, targets: [], running: false };
 let readingListItems = [];
+let onlineLibraryItems = [];
+let onlineLibraryPage = 1;
+const ONLINE_LIBRARY_PAGE_SIZE = 10;
 let newsItems = [];
 let newsSummaryState = null;
 let libraryHealthResult = null;
@@ -490,6 +493,176 @@ async function toggleSelectedReadingList(field) {
   setStatus(nextValue ? `„${series.title}“ wurde zu ${label === 'Favorit' ? 'den Favoriten' : 'der Leseliste'} hinzugefügt.` : `„${series.title}“ wurde aus ${label === 'Favorit' ? 'den Favoriten' : 'der Leseliste'} entfernt.`);
 }
 
+function onlineLibraryEntryFor(value) {
+  const key = readingKey(value);
+  return onlineLibraryItems.find((item) => readingKey(item.seriesUrl) === key) || null;
+}
+
+function onlineReadKey(chapter = {}) {
+  const rawUrl = String(chapter.url || chapter.chapterUrl || '').trim();
+  if (rawUrl) return `url:${readingKey(rawUrl)}`;
+  const id = String(chapter.id || chapter.chapterId || '').trim();
+  if (id) return `id:${id}`;
+  const title = String(chapter.title || chapter.chapterTitle || '').trim().toLowerCase();
+  return title ? `title:${title}` : '';
+}
+
+function onlineChapterReadRecord(entry, chapter) {
+  if (!entry) return null;
+  const key = onlineReadKey(chapter);
+  const records = Array.isArray(entry.readChapters) ? entry.readChapters : [];
+  const hit = key ? records.find((item) => onlineReadKey(item) === key) : null;
+  if (hit) return hit;
+  // v1.2.1 compatibility: its lastChapter fields predate readChapters.
+  if (entry.lastChapterUrl && chapter?.url && readingKey(entry.lastChapterUrl) === readingKey(chapter.url)) {
+    return { title: entry.lastChapterTitle || chapter.title || null, url: entry.lastChapterUrl, readAt: entry.lastOpenedAt || null, legacy: true };
+  }
+  if (!entry.lastChapterUrl && entry.lastChapterTitle && chapter?.title && String(entry.lastChapterTitle).trim().toLowerCase() === String(chapter.title).trim().toLowerCase()) {
+    return { title: entry.lastChapterTitle, url: chapter.url || null, readAt: entry.lastOpenedAt || null, legacy: true };
+  }
+  return null;
+}
+
+async function refreshOnlineLibrary() {
+  try {
+    onlineLibraryItems = await window.manhwaAPI.listOnlineLibrary({ limit: 20000 });
+    const button = $('#onlineLibraryToggleBtn');
+    if (button) button.textContent = onlineLibraryItems.length ? `Online-Bibliothek (${onlineLibraryItems.length})` : 'Online-Bibliothek';
+    if (selectedCatalog?.series) selectedCatalog.onlineLibrary = onlineLibraryEntryFor(selectedCatalog.series.url);
+    renderOnlineLibrary();
+    if (selectedCatalog?.series) renderCatalogChapters();
+    return onlineLibraryItems;
+  } catch (error) {
+    setStatus(`Online-Bibliothek konnte nicht geladen werden: ${error.message}`);
+    return [];
+  }
+}
+
+function renderOnlineLibrary() {
+  const box = $('#onlineLibraryList');
+  if (!box) return;
+  const needle = $('#onlineLibrarySearch')?.value.trim().toLowerCase() || '';
+  const filtered = onlineLibraryItems.filter((item) => !needle || String(item.title || '').toLowerCase().includes(needle) || String(item.source || '').toLowerCase().includes(needle) || String(item.seriesUrl || '').toLowerCase().includes(needle));
+  const pages = Math.max(1, Math.ceil(filtered.length / ONLINE_LIBRARY_PAGE_SIZE));
+  onlineLibraryPage = Math.min(pages, Math.max(1, onlineLibraryPage));
+  const start = (onlineLibraryPage - 1) * ONLINE_LIBRARY_PAGE_SIZE;
+  const visible = filtered.slice(start, start + ONLINE_LIBRARY_PAGE_SIZE);
+  $('#onlineLibraryCount').textContent = `${filtered.length} Titel`;
+  $('#onlineLibraryPage').textContent = String(onlineLibraryPage);
+  $('#onlineLibraryPages').textContent = String(pages);
+  $('#onlineLibraryPrevBtn').disabled = onlineLibraryPage <= 1;
+  $('#onlineLibraryNextBtn').disabled = onlineLibraryPage >= pages;
+  box.innerHTML = '';
+  if (!visible.length) {
+    box.innerHTML = `<div class="empty compact">${onlineLibraryItems.length ? 'Keine Treffer.' : 'Noch keine Titel gespeichert. Öffne eine Serie und klicke auf „☁ Merken“.'}</div>`;
+    return;
+  }
+  for (const item of visible) {
+    const row = document.createElement('div'); row.className = 'online-library-row';
+    if (item.cover) {
+      const img = document.createElement('img'); img.className = 'online-library-cover'; img.src = item.cover; img.alt = ''; img.loading = 'lazy'; img.addEventListener('error', () => img.remove()); row.appendChild(img);
+    }
+    const copy = document.createElement('div'); copy.className = 'online-library-copy';
+    const title = document.createElement('strong'); title.textContent = item.title || item.seriesUrl;
+    const source = item.source || (() => { try { return new URL(item.seriesUrl).hostname; } catch { return ''; } })();
+    const meta = document.createElement('small'); meta.textContent = `${seriesStatusName(item.status)}${item.language ? ` · ${languageName(item.language)}` : ''}${source ? ` · ${source}` : ''}`;
+    copy.append(title, meta);
+    if (item.lastChapterTitle) {
+      const last = document.createElement('small'); last.className = 'online-library-last'; last.textContent = `Zuletzt gelesen: ${item.lastChapterTitle}`; copy.appendChild(last);
+    }
+    const open = document.createElement('button'); open.className = 'accent'; open.textContent = 'Öffnen';
+    open.addEventListener('click', async () => {
+      showPanel('#onlineLibraryPanel', false);
+      $('#browsePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      await openCatalogSeries({ title: item.title, url: item.seriesUrl, cover: item.cover || null, status: item.status || 'unknown' });
+    });
+    const continueBtn = document.createElement('button'); continueBtn.className = 'secondary'; continueBtn.textContent = item.lastChapterUrl ? 'Weiterlesen' : 'Website';
+    continueBtn.addEventListener('click', async () => {
+      try {
+        const target = item.lastChapterUrl || item.seriesUrl;
+        await window.manhwaAPI.openReader(target);
+        if (item.lastChapterUrl) await window.manhwaAPI.markOnlineLibraryRead({ seriesUrl: item.seriesUrl, chapterTitle: item.lastChapterTitle, chapterUrl: item.lastChapterUrl });
+        await refreshOnlineLibrary();
+      } catch (error) { setStatus(`Reader konnte nicht geöffnet werden: ${error.message}`); }
+    });
+    const remove = document.createElement('button'); remove.className = 'danger'; remove.textContent = 'Entfernen';
+    remove.addEventListener('click', async () => {
+      if (!confirm(`„${item.title}“ aus der Online-Bibliothek entfernen? Downloads werden nicht gelöscht.`)) return;
+      await window.manhwaAPI.removeOnlineLibraryEntry(item.seriesUrl);
+      await refreshOnlineLibrary();
+      setStatus(`„${item.title}“ wurde aus der Online-Bibliothek entfernt.`);
+    });
+    row.append(copy, open, continueBtn, remove); box.appendChild(row);
+  }
+}
+
+async function toggleSelectedOnlineLibrary() {
+  if (!selectedCatalog?.series) return;
+  const series = selectedCatalog.series;
+  const existing = onlineLibraryEntryFor(series.url);
+  if (existing) {
+    await window.manhwaAPI.removeOnlineLibraryEntry(series.url);
+    await refreshOnlineLibrary();
+    setStatus(`„${series.title}“ wurde aus der Online-Bibliothek entfernt.`);
+    return;
+  }
+  const catalogHit = catalogItems.find((item) => sameUrl(item.url, series.url));
+  let source = selectedCatalog.connector?.label || null;
+  if (!source) { try { source = new URL(series.url).hostname; } catch {} }
+  await window.manhwaAPI.setOnlineLibraryEntry({
+    seriesUrl: series.url,
+    title: series.title,
+    cover: catalogHit?.cover || null,
+    status: normalizeSeriesStatus(series.status),
+    language: series.language || null,
+    source
+  });
+  await refreshOnlineLibrary();
+  setStatus(`„${series.title}“ wurde gespeichert. Es wurden keine Kapitel heruntergeladen.`);
+}
+
+async function readChapterOnline(chapter) {
+  if (!selectedCatalog?.series || !chapter?.url) return;
+  const series = selectedCatalog.series;
+  try {
+    // Re-resolve the chapter from the series page in the main process instead of
+    // trusting a possibly stale catalog URL. This also prevents a previous reader
+    // session/ad redirect from determining what is opened next.
+    const opened = await window.manhwaAPI.openChapterReader({
+      seriesUrl: series.url,
+      chapterId: String(chapter.id),
+      chapterTitle: chapter.title || `Chapter ${chapter.id}`,
+      chapterUrl: chapter.url
+    });
+
+    // Reading from the Online Library should always have persistent progress. If
+    // the title was not stored yet (e.g. user clicked Lesen before ☁ Merken), add
+    // the lightweight metadata entry automatically; no images/CBZs are written.
+    if (!onlineLibraryEntryFor(series.url)) {
+      const catalogHit = catalogItems.find((item) => sameUrl(item.url, series.url));
+      let source = selectedCatalog.connector?.label || null;
+      if (!source) { try { source = new URL(series.url).hostname; } catch {} }
+      await window.manhwaAPI.setOnlineLibraryEntry({
+        seriesUrl: series.url,
+        title: series.title,
+        cover: catalogHit?.cover || null,
+        status: normalizeSeriesStatus(series.status),
+        language: series.language || null,
+        source
+      });
+    }
+
+    await window.manhwaAPI.markOnlineLibraryRead({
+      seriesUrl: series.url,
+      chapterId: String(chapter.id),
+      chapterTitle: opened?.chapterTitle || chapter.title || `Chapter ${chapter.id}`,
+      chapterUrl: opened?.url || chapter.url
+    });
+    await refreshOnlineLibrary();
+    setStatus(`${opened?.chapterTitle || chapter.title || 'Kapitel'} im Online-Reader geöffnet · Lesefortschritt gespeichert. Keine CBZ wurde gespeichert.`);
+  } catch (error) { setStatus(`Online-Reader konnte nicht geöffnet werden: ${error.message}`); }
+}
+
 async function refreshNewsButton() {
   try {
     newsSummaryState = await window.manhwaAPI.getNewsSummary();
@@ -759,7 +932,7 @@ function renderCatalogChapters() {
     $('#selectedSeriesTitle').textContent = 'Kapitel';
     $('#selectedSeriesMeta').textContent = 'Wähle zuerst eine Serie aus der mittleren Liste.';
     $('#selectedChapterCount').textContent = '0';
-    $('#favoriteSelectedBtn').disabled = true; $('#readingSelectedBtn').disabled = true; $('#watchSelectedBtn').disabled = true; $('#syncSelectedBtn').disabled = true; $('#labSelectedBtn').disabled = true;
+    $('#favoriteSelectedBtn').disabled = true; $('#readingSelectedBtn').disabled = true; $('#onlineLibrarySelectedBtn').disabled = true; $('#watchSelectedBtn').disabled = true; $('#syncSelectedBtn').disabled = true; $('#labSelectedBtn').disabled = true;
     updateDownloadButtons();
     container.innerHTML = '<div class="empty compact">Kapitel erscheinen hier.</div>';
     return;
@@ -774,14 +947,19 @@ function renderCatalogChapters() {
     return matches && (!hideDownloaded || !downloaded);
   });
   $('#selectedSeriesTitle').textContent = series.title;
-  $('#selectedSeriesMeta').textContent = `${seriesStatusName(series.status)} · ${selectedCatalog.connector?.label || shortConnector(series.connectorId)} · ${series.language ? languageName(series.language) + ' · ' : ''}${series.url}`;
+  const progressEntry = onlineLibraryEntryFor(series.url);
+  const readCount = progressEntry ? all.filter((chapter) => Boolean(onlineChapterReadRecord(progressEntry, chapter))).length : 0;
+  $('#selectedSeriesMeta').textContent = `${seriesStatusName(series.status)} · ${selectedCatalog.connector?.label || shortConnector(series.connectorId)} · ${series.language ? languageName(series.language) + ' · ' : ''}${series.url}${progressEntry?.lastChapterTitle ? ` · Zuletzt gelesen: ${progressEntry.lastChapterTitle}` : ''}${progressEntry ? ` · Gelesen: ${readCount}/${all.length}` : ''}`;
   $('#selectedChapterCount').textContent = `${chapters.length}/${all.length}`;
-  $('#favoriteSelectedBtn').disabled = false; $('#readingSelectedBtn').disabled = false; $('#watchSelectedBtn').disabled = false; $('#syncSelectedBtn').disabled = false; $('#labSelectedBtn').disabled = false;
+  $('#favoriteSelectedBtn').disabled = false; $('#readingSelectedBtn').disabled = false; $('#onlineLibrarySelectedBtn').disabled = false; $('#watchSelectedBtn').disabled = false; $('#syncSelectedBtn').disabled = false; $('#labSelectedBtn').disabled = false;
   const listEntry = readingEntryFor(series.url);
   $('#favoriteSelectedBtn').textContent = listEntry?.favorite ? '★ Favorit' : '☆ Favorit';
   $('#favoriteSelectedBtn').classList.toggle('list-active', Boolean(listEntry?.favorite));
   $('#readingSelectedBtn').textContent = listEntry?.reading ? '📖 ✓ Leseliste' : '📖 Leseliste';
   $('#readingSelectedBtn').classList.toggle('list-active', Boolean(listEntry?.reading));
+  const onlineEntry = onlineLibraryEntryFor(series.url);
+  $('#onlineLibrarySelectedBtn').textContent = onlineEntry ? '☁ ✓ Gemerkt' : '☁ Merken';
+  $('#onlineLibrarySelectedBtn').classList.toggle('list-active', Boolean(onlineEntry));
   $('#watchSelectedBtn').textContent = selectedCatalog.watched ? '✓ Beobachtet' : 'Beobachten';
   $('#syncSelectedBtn').textContent = selectedCatalog.syncEnabled ? '📱 ✓ Sync' : '📱 Sync';
   $('#syncSelectedBtn').classList.toggle('sync-active', Boolean(selectedCatalog.syncEnabled));
@@ -801,6 +979,8 @@ function renderCatalogChapters() {
     const state = document.createElement('small');
     const downloaded = Boolean(chapter.downloaded) || catalogDownloadedIds.has(id);
     if (downloaded) row.classList.add('downloaded');
+    const readRecord = onlineChapterReadRecord(onlineEntry, chapter);
+    if (readRecord) row.classList.add('online-read-done');
     const activity = downloadActivity.get(id);
     if (activity?.type === 'error') { state.textContent = `Fehler: ${activity.message}`; state.className = 'error'; }
     else if (activity?.text) { state.textContent = activity.text; state.className = 'working'; }
@@ -810,6 +990,17 @@ function renderCatalogChapters() {
       badge.className = 'downloaded-badge';
       badge.textContent = chapter.downloadFormat === 'folder' ? '✓ ORDNER' : '✓ CBZ';
       title.append(' ', badge);
+    }
+    if (readRecord) {
+      const readBadge = document.createElement('span');
+      readBadge.className = 'online-read-badge';
+      readBadge.textContent = '✓ GELESEN';
+      if (readRecord.readAt) readBadge.title = `Gelesen: ${new Date(readRecord.readAt).toLocaleString()}`;
+      title.append(' ', readBadge);
+      if (!activity?.text && !downloaded) {
+        state.textContent = readRecord.readAt ? `✓ gelesen · ${new Date(readRecord.readAt).toLocaleString()}` : '✓ gelesen';
+        state.className = 'read-done';
+      }
     }
     copy.append(title, state);
     const actions = document.createElement('div'); actions.className = 'catalog-chapter-actions';
@@ -822,6 +1013,22 @@ function renderCatalogChapters() {
       open.addEventListener('click', async () => { try { await window.manhwaAPI.openDownloadedFolder(chapter.downloadFolder); } catch (error) { setStatus(`Ordner konnte nicht geöffnet werden: ${error.message}`); } });
       actions.appendChild(open);
     }
+    if (readRecord) {
+      const unread = document.createElement('button'); unread.className = 'secondary online-read-status'; unread.textContent = '✓ Gelesen';
+      unread.title = 'Als ungelesen markieren';
+      unread.addEventListener('click', async () => {
+        try {
+          await window.manhwaAPI.markOnlineLibraryUnread({ seriesUrl: series.url, chapterId: id, chapterTitle: chapter.title || `Chapter ${id}`, chapterUrl: chapter.url || null });
+          await refreshOnlineLibrary();
+          setStatus(`${chapter.title || `Chapter ${id}`} als ungelesen markiert.`);
+        } catch (error) { setStatus(`Lesestatus konnte nicht geändert werden: ${error.message}`); }
+      });
+      actions.appendChild(unread);
+    }
+    const read = document.createElement('button'); read.className = 'secondary online-read'; read.textContent = 'Lesen'; read.disabled = !chapter.url;
+    read.title = 'Online lesen, ohne das Kapitel als CBZ zu speichern';
+    read.addEventListener('click', async () => { await readChapterOnline(chapter); });
+    actions.appendChild(read);
     const button = document.createElement('button'); button.className = downloaded ? 'secondary' : ''; button.textContent = downloaded ? 'Erneut' : 'Download'; button.disabled = Boolean(activity?.text && activity.type !== 'error');
     button.addEventListener('click', async () => { await downloadCatalogChapters([id]); });
     actions.appendChild(button);
@@ -838,6 +1045,7 @@ async function openCatalogSeries(item) {
     const result = await window.manhwaAPI.catalogOpenSeries(item.url);
     selectedCatalog = result;
     selectedCatalog.readingList = readingEntryFor(result.series?.url || item.url);
+    selectedCatalog.onlineLibrary = onlineLibraryEntryFor(result.series?.url || item.url);
     const openedStatus = normalizeSeriesStatus(result.series?.status);
     if (openedStatus !== 'unknown') {
       const match = catalogItems.find((entry) => sameUrl(entry.url, result.series?.url || item.url));
@@ -1598,6 +1806,12 @@ $('#folderPath').addEventListener('keydown', (event) => {
 });
 $('#openFolderBtn').addEventListener('click', () => window.manhwaAPI.openDownloadFolder());
 $('#newsToggleBtn').addEventListener('click', async () => { showPanel('#newsPanel', true); showPanel('#debugPanel', false); await refreshNews({ markSeen: true }); $('#newsPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+$('#onlineLibraryToggleBtn').addEventListener('click', async () => { showPanel('#onlineLibraryPanel', true); showPanel('#debugPanel', false); await refreshOnlineLibrary(); $('#onlineLibraryPanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+$('#closeOnlineLibraryBtn').addEventListener('click', () => showPanel('#onlineLibraryPanel', false));
+$('#refreshOnlineLibraryBtn').addEventListener('click', refreshOnlineLibrary);
+$('#onlineLibrarySearch').addEventListener('input', () => { onlineLibraryPage = 1; renderOnlineLibrary(); });
+$('#onlineLibraryPrevBtn').addEventListener('click', () => { onlineLibraryPage = Math.max(1, onlineLibraryPage - 1); renderOnlineLibrary(); });
+$('#onlineLibraryNextBtn').addEventListener('click', () => { onlineLibraryPage += 1; renderOnlineLibrary(); });
 $('#closeNewsBtn').addEventListener('click', () => showPanel('#newsPanel', false));
 $('#newsScanBtn').addEventListener('click', runUpdateScan);
 $('#updateScanBtn').addEventListener('click', runUpdateScan);
@@ -1670,6 +1884,7 @@ $('#downloadSelectedBtn').addEventListener('click', () => downloadCatalogChapter
 $('#downloadAllBtn').addEventListener('click', () => downloadCatalogChapters((selectedCatalog?.series?.chapters || []).map((chapter) => String(chapter.id))));
 $('#favoriteSelectedBtn').addEventListener('click', async () => { try { await toggleSelectedReadingList('favorite'); } catch (error) { setStatus(`Favorit konnte nicht geändert werden: ${error.message}`); } });
 $('#readingSelectedBtn').addEventListener('click', async () => { try { await toggleSelectedReadingList('reading'); } catch (error) { setStatus(`Leseliste konnte nicht geändert werden: ${error.message}`); } });
+$('#onlineLibrarySelectedBtn').addEventListener('click', async () => { try { await toggleSelectedOnlineLibrary(); } catch (error) { setStatus(`Online-Bibliothek konnte nicht geändert werden: ${error.message}`); } });
 $('#watchSelectedBtn').addEventListener('click', async () => {
   if (!selectedCatalog?.series) return;
   try {
@@ -2074,4 +2289,4 @@ window.manhwaAPI.onEvent(async (event) => {
   if (event.type === 'check-error') { setStatus(`Prüffehler: ${event.message}`); await render(); }
 });
 
-Promise.all([loadAppVersion(), loadSettings(), renderConnectors(), refreshWebsites(), refreshDownloads(), refreshQueue(), refreshPhoneSync(), refreshReadingList(), refreshNewsButton()]).then(async () => { renderCatalogChapters(); updateSiteDownloadControls(); await render(); }).catch((error) => setStatus(`Startfehler: ${error.message}`));
+Promise.all([loadAppVersion(), loadSettings(), renderConnectors(), refreshWebsites(), refreshDownloads(), refreshQueue(), refreshPhoneSync(), refreshReadingList(), refreshOnlineLibrary(), refreshNewsButton()]).then(async () => { renderCatalogChapters(); updateSiteDownloadControls(); await render(); }).catch((error) => setStatus(`Startfehler: ${error.message}`));
