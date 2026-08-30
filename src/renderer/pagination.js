@@ -1,0 +1,254 @@
+(() => {
+  'use strict';
+
+  const STORAGE_KEY = 'manhwa-watcher-pagination-v1.1.1';
+  const DEFAULT_SIZE = 50;
+  const PAGE_SIZES = [25, 50, 100, 200];
+
+  function loadSizes() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      return {
+        sources: PAGE_SIZES.includes(Number(parsed.sources)) ? Number(parsed.sources) : DEFAULT_SIZE,
+        catalog: PAGE_SIZES.includes(Number(parsed.catalog)) ? Number(parsed.catalog) : DEFAULT_SIZE,
+        chapters: PAGE_SIZES.includes(Number(parsed.chapters)) ? Number(parsed.chapters) : DEFAULT_SIZE
+      };
+    } catch {
+      return { sources: DEFAULT_SIZE, catalog: DEFAULT_SIZE, chapters: DEFAULT_SIZE };
+    }
+  }
+
+  const sizes = loadSizes();
+  const pages = { sources: 1, catalog: 1, chapters: 1 };
+  const configs = {
+    sources: { list: '#sourceList', column: '.sources-column', row: '.source-row', label: 'Quellen' },
+    catalog: { list: '#browseResults', column: '.titles-column', row: '.title-row', label: 'Serien' },
+    chapters: { list: '#catalogChapters', column: '.chapters-column', row: '.catalog-chapter-row', label: 'Kapitel' }
+  };
+
+  function persistSizes() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sizes)); } catch {}
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function injectStyles() {
+    if (document.getElementById('mw-pagination-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'mw-pagination-styles';
+    style.textContent = `
+      .mw-pager {
+        flex: 0 0 auto;
+        display: grid;
+        grid-template-columns: auto auto minmax(0,1fr) auto auto auto;
+        align-items: center;
+        gap: 5px;
+        min-height: 42px;
+        padding: 7px 8px;
+        border-top: 1px solid #222d49;
+        background: #10192d;
+        color: #8f9abd;
+        font-size: 10px;
+      }
+      .mw-pager button {
+        min-width: 30px;
+        padding: 6px 8px;
+        border-radius: 7px;
+        background: #24304f;
+        font-size: 10px;
+      }
+      .mw-pager button:disabled { opacity: .35; }
+      .mw-page-info {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        white-space: nowrap;
+      }
+      .mw-page-number {
+        width: 48px !important;
+        min-width: 48px;
+        padding: 5px 6px !important;
+        border-radius: 7px !important;
+        text-align: center;
+        font-size: 10px;
+      }
+      .mw-page-size {
+        width: 62px;
+        padding: 5px 6px;
+        border-radius: 7px;
+        font-size: 10px;
+      }
+      .mw-page-size-label { white-space: nowrap; color: #7785aa; }
+      @media (max-width: 900px) {
+        .mw-pager { grid-template-columns: auto auto minmax(100px,1fr) auto auto; }
+        .mw-page-size-label { display: none; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensurePager(kind) {
+    const cfg = configs[kind];
+    const column = document.querySelector(cfg.column);
+    if (!column) return null;
+    let pager = column.querySelector(`.mw-pager[data-kind="${kind}"]`);
+    if (pager) return pager;
+
+    pager = document.createElement('div');
+    pager.className = 'mw-pager';
+    pager.dataset.kind = kind;
+    pager.innerHTML = `
+      <button type="button" data-action="first" title="Erste Seite">«</button>
+      <button type="button" data-action="prev" title="Vorherige Seite">‹</button>
+      <span class="mw-page-info">Seite <input class="mw-page-number" type="number" min="1" value="1" aria-label="Seitennummer" /> / <span data-role="pages">1</span></span>
+      <button type="button" data-action="next" title="Nächste Seite">›</button>
+      <button type="button" data-action="last" title="Letzte Seite">»</button>
+      <label class="mw-page-size-label" title="Einträge pro Seite"><select class="mw-page-size" aria-label="Einträge pro Seite">${PAGE_SIZES.map((n) => `<option value="${n}">${n}</option>`).join('')}</select></label>
+    `;
+
+    pager.querySelector('.mw-page-size').value = String(sizes[kind]);
+
+    pager.addEventListener('click', (event) => {
+      const action = event.target.closest('button')?.dataset.action;
+      if (!action) return;
+      const totalPages = Number(pager.dataset.totalPages || 1);
+      if (action === 'first') pages[kind] = 1;
+      if (action === 'prev') pages[kind] -= 1;
+      if (action === 'next') pages[kind] += 1;
+      if (action === 'last') pages[kind] = totalPages;
+      pages[kind] = clamp(pages[kind], 1, Math.max(1, totalPages));
+      applyPagination(kind, true);
+    });
+
+    const pageInput = pager.querySelector('.mw-page-number');
+    const jump = () => {
+      const totalPages = Number(pager.dataset.totalPages || 1);
+      pages[kind] = clamp(Number.parseInt(pageInput.value, 10) || 1, 1, Math.max(1, totalPages));
+      applyPagination(kind, true);
+    };
+    pageInput.addEventListener('change', jump);
+    pageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); jump(); pageInput.blur(); }
+    });
+
+    pager.querySelector('.mw-page-size').addEventListener('change', (event) => {
+      sizes[kind] = PAGE_SIZES.includes(Number(event.target.value)) ? Number(event.target.value) : DEFAULT_SIZE;
+      pages[kind] = 1;
+      persistSizes();
+      applyPagination(kind, true);
+    });
+
+    column.appendChild(pager);
+    return pager;
+  }
+
+  function applyPagination(kind, scrollTop = false) {
+    const cfg = configs[kind];
+    const list = document.querySelector(cfg.list);
+    if (!list) return;
+    const pager = ensurePager(kind);
+    if (!pager) return;
+
+    const rows = [...list.querySelectorAll(`:scope > ${cfg.row}`)];
+    const total = rows.length;
+    const pageSize = sizes[kind];
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    pages[kind] = clamp(pages[kind], 1, totalPages);
+    const start = (pages[kind] - 1) * pageSize;
+    const end = start + pageSize;
+
+    rows.forEach((row, index) => { row.hidden = index < start || index >= end; });
+
+    pager.dataset.totalPages = String(totalPages);
+    pager.querySelector('[data-role="pages"]').textContent = String(totalPages);
+    pager.querySelector('.mw-page-number').value = String(pages[kind]);
+    pager.querySelector('.mw-page-number').max = String(totalPages);
+    pager.querySelector('.mw-page-size').value = String(pageSize);
+    pager.querySelector('[data-action="first"]').disabled = pages[kind] <= 1;
+    pager.querySelector('[data-action="prev"]').disabled = pages[kind] <= 1;
+    pager.querySelector('[data-action="next"]').disabled = pages[kind] >= totalPages;
+    pager.querySelector('[data-action="last"]').disabled = pages[kind] >= totalPages;
+    pager.style.display = total > 0 ? 'grid' : 'none';
+
+    if (scrollTop) list.scrollTop = 0;
+  }
+
+  function resetPage(kind) {
+    pages[kind] = 1;
+  }
+
+  function wrapRenderer(name, kind) {
+    const original = globalThis[name];
+    if (typeof original !== 'function') return;
+    globalThis[name] = function (...args) {
+      const result = original.apply(this, args);
+      queueMicrotask(() => applyPagination(kind));
+      return result;
+    };
+  }
+
+  function wrapAsync(name, before) {
+    const original = globalThis[name];
+    if (typeof original !== 'function') return;
+    globalThis[name] = async function (...args) {
+      before(...args);
+      return original.apply(this, args);
+    };
+  }
+
+  function currentFilteredChapters() {
+    if (!selectedCatalog?.series) return [];
+    const needle = document.querySelector('#chapterSearch')?.value.trim().toLowerCase() || '';
+    const hideDownloaded = Boolean(document.querySelector('#hideDownloaded')?.checked);
+    return [...(selectedCatalog.series.chapters || [])].filter((chapter) => {
+      const id = String(chapter.id);
+      const downloaded = Boolean(chapter.downloaded) || catalogDownloadedIds.has(id);
+      const matches = !needle || String(chapter.title || '').toLowerCase().includes(needle) || String(chapter.number ?? '').includes(needle);
+      return matches && (!hideDownloaded || !downloaded);
+    });
+  }
+
+  function installResetListeners() {
+    document.querySelector('#browseSearch')?.addEventListener('input', () => resetPage('catalog'), { capture: true });
+    document.querySelector('#chapterSearch')?.addEventListener('input', () => resetPage('chapters'), { capture: true });
+    document.querySelector('#hideDownloaded')?.addEventListener('change', () => resetPage('chapters'), { capture: true });
+    document.querySelector('#favoritesOnly')?.addEventListener('change', () => resetPage('catalog'), { capture: true });
+    document.querySelector('#readingOnly')?.addEventListener('change', () => resetPage('catalog'), { capture: true });
+    document.querySelectorAll('.series-status-filter input[type="checkbox"]').forEach((node) => {
+      node.addEventListener('change', () => resetPage('catalog'), { capture: true });
+    });
+
+    const selectAll = document.querySelector('#chapterSelectAllBtn');
+    selectAll?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      for (const chapter of currentFilteredChapters()) selectedChapterIds.add(String(chapter.id));
+      renderCatalogChapters();
+    }, { capture: true });
+  }
+
+  function init() {
+    injectStyles();
+    wrapRenderer('renderSources', 'sources');
+    wrapRenderer('renderCatalog', 'catalog');
+    wrapRenderer('renderCatalogChapters', 'chapters');
+    wrapAsync('loadCatalog', () => { resetPage('catalog'); resetPage('chapters'); });
+    wrapAsync('openCatalogSeries', () => resetPage('chapters'));
+    installResetListeners();
+
+    applyPagination('sources');
+    applyPagination('catalog');
+    applyPagination('chapters');
+  }
+
+  try {
+    init();
+  } catch (error) {
+    console.error('Pagination konnte nicht initialisiert werden:', error);
+    try { window.manhwaAPI?.rendererLog?.('error', 'Pagination konnte nicht initialisiert werden', { message: error.message }); } catch {}
+  }
+})();
