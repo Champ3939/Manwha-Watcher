@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.2 – Pagination Hotfix
+
+- Fix: Seitenfremde Quellen, Serien und Kapitel werden jetzt zuverlässig per `display: none` ausgeblendet.
+- Fix: Die bisherigen `.source-row`/`.title-row`-Regeln mit `display: flex` konnten das HTML-Attribut `hidden` überschreiben und dadurch weiterhin alle Einträge anzeigen.
+- Fix: Pagination beobachtet die drei Listen jetzt per `MutationObserver` und wird nach Suche, Filterung, Katalog- und Kapitel-Reload automatisch erneut angewendet.
+- Fix: robusteres Laden des Pagination-Renderers mit Debug-Log.
+- Getestet mit 120 Einträgen: 50 pro Seite, korrekter Seitenwechsel sowie 25/50/100/200 Einträge pro Seite.
+
 ## v1.1.1 – Pagination UX
 
 - Pagination für Quellen, Serien und Kapitel im HakuNeko-Browser.
