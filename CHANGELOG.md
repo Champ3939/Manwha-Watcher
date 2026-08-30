@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.3 – Compact Pagination
+
+- Standard page size changed from 50 to 10 entries.
+- Page-size choices are now 10 / 25 / 50 / 100.
+- Sources column uses a compact pager so controls fit cleanly in the narrow column.
+- Previous v1.1.1/v1.1.2 page-size preference is intentionally reset once, so v1.1.3 starts at 10 entries.
+
 ## v1.1.2 – Pagination Hotfix
 
 - Fix: Seitenfremde Quellen, Serien und Kapitel werden jetzt zuverlässig per `display: none` ausgeblendet.
