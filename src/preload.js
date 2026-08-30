@@ -85,3 +85,13 @@ contextBridge.exposeInMainWorld('manhwaAPI', {
     return () => ipcRenderer.removeListener('app:event', handler);
   }
 });
+
+// v1.1.1: Load the pagination layer after app.js has registered the normal
+// renderer functions and event handlers. Keeping it separate minimizes changes
+// to the stable browser/download code and makes the UX layer easy to maintain.
+window.addEventListener('DOMContentLoaded', () => {
+  const script = document.createElement('script');
+  script.src = 'pagination.js';
+  script.defer = true;
+  document.body.appendChild(script);
+});

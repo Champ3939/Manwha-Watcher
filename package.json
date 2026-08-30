@@ -1,13 +1,13 @@
 {
   "name": "manhwa-watcher",
-  "version": "1.1.0",
-  "description": "Portable Electron manhwa watcher with SQLite storage, favorites/reading list, news dashboard, automatic library repair, storage dashboard, CBZ health checks, ComicInfo metadata, download queue, scheduled updates, backups, catalog/status/language filtering and Syncthing/Anyomi sync",
+  "version": "1.1.1",
+  "description": "Portable Electron manhwa watcher with paginated catalog browsing, SQLite storage, favorites/reading list, news dashboard, automatic library repair, storage dashboard, CBZ health checks, ComicInfo metadata, download queue, scheduled updates, backups, catalog/status/language filtering and Syncthing/Anyomi sync",
   "main": "src/main.js",
   "author": "Manhwa Watcher contributors",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/core/browserService.js && node --check src/core/updateScheduler.js && node --check src/core/backupManager.js && node --check src/core/comicInfo.js && node --check src/core/libraryHealth.js && node --check src/core/libraryRepair.js && node --check src/core/logger.js && node --check src/core/languageFilter.js && node --check src/core/seriesStatus.js && node --check src/core/connectorManager.js && node --check src/core/downloader.js && node --check src/core/downloadStatus.js && node --check src/core/store.js && node --check src/core/phoneSync.js && node --check src/core/watcher.js && node --check src/core/updateScanner.js && node --check src/core/siteDownloader.js && node --check src/connectors/base.js && node --check src/connectors/demo.js && node --check src/connectors/autoDetect.js && node --check src/connectors/genericManifest.js && node --check src/connectors/recipe.js && node --check src/connectors/recipeLoader.js && node --check src/renderer/app.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/core/browserService.js && node --check src/core/updateScheduler.js && node --check src/core/backupManager.js && node --check src/core/comicInfo.js && node --check src/core/libraryHealth.js && node --check src/core/libraryRepair.js && node --check src/core/logger.js && node --check src/core/languageFilter.js && node --check src/core/seriesStatus.js && node --check src/core/connectorManager.js && node --check src/core/downloader.js && node --check src/core/downloadStatus.js && node --check src/core/store.js && node --check src/core/phoneSync.js && node --check src/core/watcher.js && node --check src/core/updateScanner.js && node --check src/core/siteDownloader.js && node --check src/connectors/base.js && node --check src/connectors/demo.js && node --check src/connectors/autoDetect.js && node --check src/connectors/genericManifest.js && node --check src/connectors/recipe.js && node --check src/connectors/recipeLoader.js && node --check src/renderer/app.js && node --check src/renderer/pagination.js",
     "dist": "electron-builder --win portable",
     "pack": "electron-builder --dir"
   },
