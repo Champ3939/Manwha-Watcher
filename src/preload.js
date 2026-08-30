@@ -86,12 +86,18 @@ contextBridge.exposeInMainWorld('manhwaAPI', {
   }
 });
 
-// v1.1.1: Load the pagination layer after app.js has registered the normal
-// renderer functions and event handlers. Keeping it separate minimizes changes
-// to the stable browser/download code and makes the UX layer easy to maintain.
-window.addEventListener('DOMContentLoaded', () => {
+// v1.1.2: Inject the renderer pagination layer defensively. Dynamic scripts
+// execute in the normal renderer world, where app.js state and functions are
+// available. The readyState fallback also works if DOMContentLoaded already ran.
+function loadPaginationLayer() {
+  if (document.querySelector('script[data-mw-pagination]')) return;
   const script = document.createElement('script');
-  script.src = 'pagination.js';
-  script.defer = true;
-  document.body.appendChild(script);
-});
+  script.dataset.mwPagination = '1';
+  script.src = new URL('pagination.js', document.baseURI).href;
+  script.addEventListener('load', () => ipcRenderer.send('debug:renderer', { level: 'info', message: 'Pagination-Script geladen', details: { src: script.src } }));
+  script.addEventListener('error', () => ipcRenderer.send('debug:renderer', { level: 'error', message: 'Pagination-Script konnte nicht geladen werden', details: { src: script.src } }));
+  (document.body || document.head || document.documentElement).appendChild(script);
+}
+
+if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', loadPaginationLayer, { once: true });
+else loadPaginationLayer();
