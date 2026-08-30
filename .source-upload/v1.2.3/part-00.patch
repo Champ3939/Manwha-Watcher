@@ -1,0 +1,161 @@
+diff -ruN v113/CHANGELOG.md v123/CHANGELOG.md
+--- v113/CHANGELOG.md	2026-08-30 15:32:56.608683375 +0000
++++ v123/CHANGELOG.md	2026-08-30 15:32:56.609242525 +0000
+@@ -1,5 +1,40 @@
+ # Changelog
+ 
++## v1.2.3 – Layout Fix
++
++- Fix: Die Aktionsbuttons im Kopf der Kapitelspalte laufen nicht mehr über den rechten Rand.
++- Favorit, Leseliste, Online-Bibliothek, Beobachten, Handy-Sync und Connector brechen bei wenig Platz sauber in eine zweite Zeile um.
++- Die Buttons wurden in dieser Leiste leicht kompakter gemacht, ohne Funktionen zu entfernen.
++
++## v1.2.2 – Chapter Read Status
++
++- Online-Bibliothek speichert jetzt nicht nur das zuletzt gelesene Kapitel, sondern alle gelesenen Kapitel pro Serie.
++- Gelesene Kapitel werden in der Kapitelliste mit `✓ GELESEN` und einer grünen Markierung angezeigt.
++- Der Serienkopf zeigt `Gelesen: X/Y`.
++- Ein Klick auf `Lesen` markiert das Kapitel automatisch als gelesen.
++- `✓ Gelesen` kann angeklickt werden, um ein Kapitel wieder als ungelesen zu markieren.
++- Bestehender v1.2.1-Fortschritt (`Zuletzt gelesen`) wird rückwärtskompatibel als gelesen erkannt.
++- Keine zusätzliche CBZ-/Bildspeicherung; der Lesestatus liegt nur in SQLite.
++
++## v1.2.1 – Online Reader & Progress Fix
++
++- Fix: Kapitel werden vor jedem Online-Lesen frisch aus der Serienseite aufgelöst; stale Reader-URLs werden nicht wiederverwendet.
++- Fix: Der integrierte Reader startet für jedes Kapitel in einem frischen Browserfenster und blockiert unerwartete Navigationen auf andere Titel.
++- Fix: Nach erfolgreichem Öffnen wird der Lesefortschritt zuverlässig in der Online-Bibliothek gespeichert.
++- Verbesserung: Falls „Lesen“ vor „☁ Merken“ benutzt wird, wird die Serie automatisch leichtgewichtig in der Online-Bibliothek gespeichert.
++- Verbesserung: „Zuletzt gelesen: …“ wird zusätzlich direkt bei der geöffneten Serie angezeigt.
++
++## v1.2.0 – Online Library
++
++- Neue Online-Bibliothek: Serien können gespeichert werden, ohne Kapitel/CBZ-Dateien herunterzuladen.
++- Gespeichert werden nur Titel, Cover, Quelle, URL, Sprache/Status und Lesefortschritt.
++- Globale Online-Bibliotheksansicht über alle Quellen mit Suche und 10 Titeln pro Seite.
++- „☁ Merken“ direkt bei einer geöffneten Serie.
++- „Lesen“ bei jedem Kapitel öffnet die Reader-Seite live im integrierten Chromium-Browser.
++- Zuletzt gelesene Kapitel werden pro gespeicherter Online-Serie gemerkt; „Weiterlesen“ öffnet sie direkt wieder.
++- Online-Bibliothek ist Bestandteil von Backup/Restore.
++- Normale CBZ-Downloads, Handy-Sync und Offline-Bibliothek bleiben unverändert nutzbar.
++
+ ## v1.1.3 – Compact Pagination
+ 
+ - Standard page size changed from 50 to 10 entries.
+diff -ruN v113/README.md v123/README.md
+--- v113/README.md	2026-08-30 15:32:56.608549118 +0000
++++ v123/README.md	2026-08-30 15:32:56.612745964 +0000
+@@ -29,3 +29,29 @@
+ 
+ ## Feature Freeze
+ Mit v1.1.0 ist der geplante Funktionsumfang vorerst abgeschlossen. Weitere Releases sollen sich primär auf Fehlerbehebungen, Seitenkompatibilität und Stabilität konzentrieren.
++
++---
++
++## Online Library (v1.2.1)
++
++The **Online Library** lets you keep a large collection without storing every chapter on disk.
++
++When you click **☁ Merken** on an opened series, Manhwa Watcher stores only lightweight metadata such as the title, cover URL, source, series URL, language/status and your last-read chapter. No CBZ files are created.
++
++Open **Online-Bibliothek** from the header to search all saved titles across all sources. Opening a saved title loads its current chapter list live from the source. Use **Lesen** next to a chapter to open the source reader in Manhwa Watcher's integrated Chromium browser without downloading that chapter.
++
++The last chapter opened through **Lesen** is remembered and can be reopened with **Weiterlesen**. v1.2.1 re-resolves the selected chapter before opening it and blocks unexpected redirects to unrelated titles.
++
++Offline CBZ downloads remain available independently, so you can mix both workflows:
++
++```text
++Online Library -> thousands of lightweight saved titles
++CBZ Library    -> selected series/chapters you want offline
++```
++
++Online Library entries are included in backup/restore.
++
++
++## Read status
++
++Online Library chapters are marked with `✓ GELESEN` after you open them in the online reader. The status can be reset without deleting the title or any downloads.
+diff -ruN v113/RELEASE_NOTES_v1.2.0.md v123/RELEASE_NOTES_v1.2.0.md
+--- v113/RELEASE_NOTES_v1.2.0.md	1970-01-01 00:00:00.000000000 +0000
++++ v123/RELEASE_NOTES_v1.2.0.md	2026-08-30 15:32:56.612553932 +0000
+@@ -0,0 +1,11 @@
++# Manhwa Watcher v1.2.0 – Online Library
++
++This release adds an Aniyomi-style online library mode.
++
++- Save series without downloading chapters.
++- Only metadata, source URLs, covers and reading progress are stored locally.
++- Search the saved online library across all sources.
++- Open saved series to fetch their chapter list live.
++- Use **Lesen** on a chapter to open the source reader without creating a CBZ.
++- **Weiterlesen** remembers and reopens the last chapter read.
++- Existing offline CBZ downloads and Syncthing/Anyomi sync continue to work normally.
+diff -ruN v113/RELEASE_NOTES_v1.2.1.md v123/RELEASE_NOTES_v1.2.1.md
+--- v113/RELEASE_NOTES_v1.2.1.md	1970-01-01 00:00:00.000000000 +0000
++++ v123/RELEASE_NOTES_v1.2.1.md	2026-08-30 15:32:56.609301452 +0000
+@@ -0,0 +1,12 @@
++# Manhwa Watcher v1.2.1 – Online Reader & Progress Fix
++
++This maintenance release fixes the first Online Library reader issues found in v1.2.0.
++
++- Chapters are re-resolved from the series page before every online read.
++- Every chapter opens in a fresh integrated reader window.
++- Unexpected redirects to unrelated titles are blocked instead of being shown.
++- Reading progress is saved only after the correct chapter has opened successfully.
++- Using **Lesen** automatically creates the lightweight Online Library entry when needed.
++- The currently opened series also shows **Zuletzt gelesen** when progress exists.
++
++No CBZ is created by the online reader. Existing v1.2.0 SQLite data remains compatible.
+diff -ruN v113/RELEASE_NOTES_v1.2.2.md v123/RELEASE_NOTES_v1.2.2.md
+--- v113/RELEASE_NOTES_v1.2.2.md	1970-01-01 00:00:00.000000000 +0000
++++ v123/RELEASE_NOTES_v1.2.2.md	2026-08-30 15:32:56.612514674 +0000
+@@ -0,0 +1,11 @@
++# Manhwa Watcher v1.2.2 – Chapter Read Status
++
++The Online Library now tracks every chapter you read.
++
++- Read chapters show a visible `✓ GELESEN` badge.
++- Read rows receive a subtle green highlight.
++- The series header shows `Gelesen: X/Y`.
++- Reading a chapter marks it automatically.
++- Use the `✓ Gelesen` button to mark a chapter unread again.
++- Existing v1.2.1 `Zuletzt gelesen` progress remains recognized.
++- Only metadata is stored in SQLite; no CBZ or image is saved by this feature.
+diff -ruN v113/RELEASE_NOTES_v1.2.3.md v123/RELEASE_NOTES_v1.2.3.md
+--- v113/RELEASE_NOTES_v1.2.3.md	1970-01-01 00:00:00.000000000 +0000
++++ v123/RELEASE_NOTES_v1.2.3.md	2026-08-30 15:32:56.612886189 +0000
+@@ -0,0 +1,7 @@
++# Manhwa Watcher v1.2.3
++
++Small UI hotfix for the selected-series action bar.
++
++- Prevents Favorite / Reading List / Online Library / Watch / Sync / Connector buttons from overflowing the chapter column.
++- Action buttons now wrap cleanly when the available width is too small.
++- No database migration is required; existing v1.2.2 data is fully compatible.
+diff -ruN v113/package.json v123/package.json
+--- v113/package.json	2026-08-30 15:32:56.608825774 +0000
++++ v123/package.json	2026-08-30 15:32:56.612795016 +0000
+@@ -1,7 +1,7 @@
+ {
+   "name": "manhwa-watcher",
+-  "version": "1.1.3",
+-  "description": "Portable Electron manhwa watcher with paginated catalog browsing, SQLite storage, favorites/reading list, news dashboard, automatic library repair, storage dashboard, CBZ health checks, ComicInfo metadata, download queue, scheduled updates, backups, catalog/status/language filtering and Syncthing/Anyomi sync",
++  "version": "1.2.3",
++  "description": "Portable Electron manhwa watcher with an online library for reading without downloads, paginated catalog browsing, SQLite storage, favorites/reading list, news dashboard, automatic library repair, storage dashboard, CBZ health checks, ComicInfo metadata, download queue, scheduled updates, backups, catalog/status/language filtering and Syncthing/Anyomi sync",
+   "main": "src/main.js",
+   "author": "",
+   "license": "MIT",
+diff -ruN v113/src/core/browserService.js v123/src/core/browserService.js
+--- v113/src/core/browserService.js	2026-08-30 15:32:56.607396748 +0000
++++ v123/src/core/browserService.js	2026-08-30 15:32:56.611722673 +0000
+@@ -2435,6 +2435,71 @@
+     });
+   }
+ 
++  async openLockedReader(rawUrl) {
++    const requestedUrl = String(rawUrl || '').trim();
++    if (!/^https?:\/\//i.test(requestedUrl)) throw new Error('Ungültige Reader-URL.');
++
++    return this.serialize(async () => {
++      // Always start the online reader in a fresh window. A reader page may run
++      /
