@@ -4,6 +4,14 @@
   const STORAGE_KEY = 'manhwa-watcher-pagination-v1.1.1';
   const DEFAULT_SIZE = 50;
   const PAGE_SIZES = [25, 50, 100, 200];
+  const sizes = loadSizes();
+  const pages = { sources: 1, catalog: 1, chapters: 1 };
+  const configs = {
+    sources: { list: '#sourceList', column: '.sources-column', row: '.source-row' },
+    catalog: { list: '#browseResults', column: '.titles-column', row: '.title-row' },
+    chapters: { list: '#catalogChapters', column: '.chapters-column', row: '.catalog-chapter-row' }
+  };
+  const pending = new Set();
 
   function loadSizes() {
     try {
@@ -17,14 +25,6 @@
       return { sources: DEFAULT_SIZE, catalog: DEFAULT_SIZE, chapters: DEFAULT_SIZE };
     }
   }
-
-  const sizes = loadSizes();
-  const pages = { sources: 1, catalog: 1, chapters: 1 };
-  const configs = {
-    sources: { list: '#sourceList', column: '.sources-column', row: '.source-row', label: 'Quellen' },
-    catalog: { list: '#browseResults', column: '.titles-column', row: '.title-row', label: 'Serien' },
-    chapters: { list: '#catalogChapters', column: '.chapters-column', row: '.catalog-chapter-row', label: 'Kapitel' }
-  };
 
   function persistSizes() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sizes)); } catch {}
@@ -109,7 +109,6 @@
       <button type="button" data-action="last" title="Letzte Seite">»</button>
       <label class="mw-page-size-label" title="Einträge pro Seite"><select class="mw-page-size" aria-label="Einträge pro Seite">${PAGE_SIZES.map((n) => `<option value="${n}">${n}</option>`).join('')}</select></label>
     `;
-
     pager.querySelector('.mw-page-size').value = String(sizes[kind]);
 
     pager.addEventListener('click', (event) => {
@@ -117,9 +116,9 @@
       if (!action) return;
       const totalPages = Number(pager.dataset.totalPages || 1);
       if (action === 'first') pages[kind] = 1;
-      if (action === 'prev') pages[kind] -= 1;
-      if (action === 'next') pages[kind] += 1;
-      if (action === 'last') pages[kind] = totalPages;
+      else if (action === 'prev') pages[kind] -= 1;
+      else if (action === 'next') pages[kind] += 1;
+      else if (action === 'last') pages[kind] = totalPages;
       pages[kind] = clamp(pages[kind], 1, Math.max(1, totalPages));
       applyPagination(kind, true);
     });
@@ -161,7 +160,12 @@
     const start = (pages[kind] - 1) * pageSize;
     const end = start + pageSize;
 
-    rows.forEach((row, index) => { row.hidden = index < start || index >= end; });
+    // v1.1.2 hotfix: do not use the HTML `hidden` attribute here. The
+    // existing renderer CSS sets display:flex on rows, which can override
+    // hidden and keep every entry visible. Inline display:none wins reliably.
+    rows.forEach((row, index) => {
+      row.style.display = index >= start && index < end ? '' : 'none';
+    });
 
     pager.dataset.totalPages = String(totalPages);
     pager.querySelector('[data-role="pages"]').textContent = String(totalPages);
@@ -173,43 +177,48 @@
     pager.querySelector('[data-action="next"]').disabled = pages[kind] >= totalPages;
     pager.querySelector('[data-action="last"]').disabled = pages[kind] >= totalPages;
     pager.style.display = total > 0 ? 'grid' : 'none';
-
     if (scrollTop) list.scrollTop = 0;
+  }
+
+  function scheduleApply(kind, scrollTop = false) {
+    const key = `${kind}:${scrollTop ? 1 : 0}`;
+    if (pending.has(key)) return;
+    pending.add(key);
+    requestAnimationFrame(() => {
+      pending.delete(key);
+      applyPagination(kind, scrollTop);
+    });
   }
 
   function resetPage(kind) {
     pages[kind] = 1;
+    scheduleApply(kind, true);
   }
 
-  function wrapRenderer(name, kind) {
-    const original = globalThis[name];
-    if (typeof original !== 'function') return;
-    globalThis[name] = function (...args) {
-      const result = original.apply(this, args);
-      queueMicrotask(() => applyPagination(kind));
-      return result;
-    };
-  }
-
-  function wrapAsync(name, before) {
-    const original = globalThis[name];
-    if (typeof original !== 'function') return;
-    globalThis[name] = async function (...args) {
-      before(...args);
-      return original.apply(this, args);
-    };
+  function observeLists() {
+    for (const [kind, cfg] of Object.entries(configs)) {
+      const list = document.querySelector(cfg.list);
+      if (!list) continue;
+      new MutationObserver((mutations) => {
+        if (mutations.some((entry) => entry.type === 'childList')) scheduleApply(kind);
+      }).observe(list, { childList: true });
+    }
   }
 
   function currentFilteredChapters() {
-    if (!selectedCatalog?.series) return [];
-    const needle = document.querySelector('#chapterSearch')?.value.trim().toLowerCase() || '';
-    const hideDownloaded = Boolean(document.querySelector('#hideDownloaded')?.checked);
-    return [...(selectedCatalog.series.chapters || [])].filter((chapter) => {
-      const id = String(chapter.id);
-      const downloaded = Boolean(chapter.downloaded) || catalogDownloadedIds.has(id);
-      const matches = !needle || String(chapter.title || '').toLowerCase().includes(needle) || String(chapter.number ?? '').includes(needle);
-      return matches && (!hideDownloaded || !downloaded);
-    });
+    try {
+      if (!selectedCatalog?.series) return [];
+      const needle = document.querySelector('#chapterSearch')?.value.trim().toLowerCase() || '';
+      const hideDownloaded = Boolean(document.querySelector('#hideDownloaded')?.checked);
+      return [...(selectedCatalog.series.chapters || [])].filter((chapter) => {
+        const id = String(chapter.id);
+        const downloaded = Boolean(chapter.downloaded) || catalogDownloadedIds.has(id);
+        const matches = !needle || String(chapter.title || '').toLowerCase().includes(needle) || String(chapter.number ?? '').includes(needle);
+        return matches && (!hideDownloaded || !downloaded);
+      });
+    } catch {
+      return [];
+    }
   }
 
   function installResetListeners() {
@@ -221,28 +230,37 @@
     document.querySelectorAll('.series-status-filter input[type="checkbox"]').forEach((node) => {
       node.addEventListener('change', () => resetPage('catalog'), { capture: true });
     });
+    document.querySelector('#browseLoadBtn')?.addEventListener('click', () => { resetPage('catalog'); resetPage('chapters'); }, { capture: true });
+    document.querySelector('#sourceSelect')?.addEventListener('change', () => { resetPage('catalog'); resetPage('chapters'); }, { capture: true });
+    document.querySelector('#sourceList')?.addEventListener('click', (event) => {
+      if (event.target.closest('.source-row')) { resetPage('catalog'); resetPage('chapters'); }
+    }, { capture: true });
+    document.querySelector('#browseResults')?.addEventListener('click', (event) => {
+      if (event.target.closest('.title-row')) resetPage('chapters');
+    }, { capture: true });
 
     const selectAll = document.querySelector('#chapterSelectAllBtn');
     selectAll?.addEventListener('click', (event) => {
+      const chapters = currentFilteredChapters();
+      if (!chapters.length) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      for (const chapter of currentFilteredChapters()) selectedChapterIds.add(String(chapter.id));
+      for (const chapter of chapters) selectedChapterIds.add(String(chapter.id));
       renderCatalogChapters();
     }, { capture: true });
   }
 
   function init() {
     injectStyles();
-    wrapRenderer('renderSources', 'sources');
-    wrapRenderer('renderCatalog', 'catalog');
-    wrapRenderer('renderCatalogChapters', 'chapters');
-    wrapAsync('loadCatalog', () => { resetPage('catalog'); resetPage('chapters'); });
-    wrapAsync('openCatalogSeries', () => resetPage('chapters'));
+    ensurePager('sources');
+    ensurePager('catalog');
+    ensurePager('chapters');
+    observeLists();
     installResetListeners();
-
     applyPagination('sources');
     applyPagination('catalog');
     applyPagination('chapters');
+    try { window.manhwaAPI?.rendererLog?.('info', 'Pagination v1.1.2 geladen', { defaultPageSize: DEFAULT_SIZE }); } catch {}
   }
 
   try {
