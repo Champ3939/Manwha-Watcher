@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.1 – Pagination UX
+
+- Pagination für Quellen, Serien und Kapitel im HakuNeko-Browser.
+- Standardmäßig 50 Einträge pro Seite; 25/50/100/200 sind direkt auswählbar.
+- Navigation zur ersten, vorherigen, nächsten und letzten Seite.
+- Direkte Eingabe einer Seitennummer.
+- Suche und Filter arbeiten weiterhin über den vollständigen geladenen Katalog, nicht nur über die aktuelle Seite.
+- Suche, Status-/Favoriten-/Leselistenfilter und Serienwechsel setzen die jeweilige Ansicht sinnvoll auf Seite 1 zurück.
+- Kapitel-Auswahl bleibt beim Seitenwechsel erhalten.
+- „Alle“ bei Kapiteln wählt alle aktuell gefilterten Kapitel und nicht nur die sichtbare Seite.
+- Gewählte Seitengröße wird lokal gespeichert.
+
 ## v1.1.0 – Feature Freeze
 
 - SQLite (`Manhwa-Watcher-Data/library.db`) ist jetzt die primäre Datenhaltung.
