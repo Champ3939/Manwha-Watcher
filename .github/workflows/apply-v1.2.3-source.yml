@@ -1,0 +1,49 @@
+name: Apply v1.2.3 source
+
+on:
+  push:
+    branches:
+      - v1.2.3-github-sync
+    paths:
+      - '.source-upload/v1.2.3/**'
+      - '.github/workflows/apply-v1.2.3-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply staged source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          parts=(.source-upload/v1.2.3/part-*.patch)
+          if [ ${#parts[@]} -eq 0 ]; then
+            echo 'Patch already applied; nothing to do.'
+            exit 0
+          fi
+          cat "${parts[@]}" > /tmp/manhwa-watcher-v1.2.3.patch
+          patch -p1 --forward --batch < /tmp/manhwa-watcher-v1.2.3.patch
+          rm -rf .source-upload/v1.2.3
+
+      - name: Commit updated v1.2.3 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Update source to Manhwa Watcher v1.2.3'
+          git push origin HEAD:${GITHUB_REF_NAME}
