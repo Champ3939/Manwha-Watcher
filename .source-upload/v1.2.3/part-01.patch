@@ -1,0 +1,153 @@
+/ advertising/redirect scripts after it has been visible for a while; those
++      // must never influence the next chapter the user opens.
++      let win = await this.ensureWindow({ fresh: true, preserveVisibility: false });
++      win.hide();
++      await this._navigateWindow(win, requestedUrl, { timeoutMs: 30000, settleMs: 150, bypassCache: false });
++
++      let finalUrl = String(win.webContents.getURL() || requestedUrl);
++      const compatible = (wanted, actual) => {
++        try {
++          const a = new URL(wanted); const b = new URL(actual);
++          if (a.origin !== b.origin) return false;
++          const clean = (p) => decodeURIComponent(p).replace(/\/+$/, '').toLowerCase();
++          const ap = clean(a.pathname); const bp = clean(b.pathname);
++          if (ap === bp) return true;
++          // Canonical redirects often add/remove a suffix or a trailing chapter
++          // segment. Keep them only when the meaningful path tokens still overlap.
++          const tokens = (p) => p.split('/').filter(Boolean).filter((x) => x.length > 2 && !/^(?:chapter|chap|ch|read|reader|webtoon|manga|manhwa)$/i.test(x));
++          const at = tokens(ap); const bt = new Set(tokens(bp));
++          const overlap = at.filter((x) => bt.has(x)).length;
++          const numbersA = new Set((ap.match(/\d+(?:\.\d+)?/g) || []));
++          const numbersB = new Set((bp.match(/\d+(?:\.\d+)?/g) || []));
++          const numberOverlap = [...numbersA].some((x) => numbersB.has(x));
++          return overlap >= Math.min(2, Math.max(1, at.length)) && (numbersA.size === 0 || numberOverlap);
++        } catch { return false; }
++      };
++
++      if (!compatible(requestedUrl, finalUrl)) {
++        this.logger?.warn('Online-Reader wurde unerwartet umgeleitet; Original-URL wird erneut geladen', { requestedUrl, finalUrl });
++        win = await this.ensureWindow({ fresh: true, preserveVisibility: false });
++        await this._navigateWindow(win, requestedUrl, { timeoutMs: 30000, settleMs: 80, bypassCache: true });
++        finalUrl = String(win.webContents.getURL() || requestedUrl);
++        if (!compatible(requestedUrl, finalUrl)) {
++          this.logger?.warn('Online-Reader blockiert fremde Zielseite', { requestedUrl, finalUrl });
++          try { win.destroy(); } catch {}
++          this.window = null;
++          throw new Error('Die Webseite hat den Reader auf einen anderen Titel umgeleitet. Die Navigation wurde blockiert.');
++        }
++      }
++
++      // Once the correct reader is loaded, keep this window on the same chapter.
++      // Popups are already denied globally; this additionally blocks scripts that
++      // try to replace the main document with another title/advertising route.
++      const lockedUrl = finalUrl;
++      const guard = (event, nextUrl) => {
++        if (!compatible(lockedUrl, nextUrl)) {
++          event.preventDefault();
++          this.logger?.warn('Online-Reader: unerwartete Hauptnavigation blockiert', { lockedUrl, nextUrl });
++        }
++      };
++      win.webContents.on('will-navigate', guard);
++      win.once('closed', () => { try { win.webContents?.removeListener?.('will-navigate', guard); } catch {} });
++      win.show();
++      win.focus();
++      this.lastRequestedUrl = requestedUrl;
++      this.lastLoadedUrl = finalUrl;
++      return { visible: true, url: finalUrl, title: win.webContents.getTitle() };
++    });
++  }
++
+   async setVisible(visible, { fallbackUrl = null } = {}) {
+     return this.serialize(async () => {
+       let win = await this.ensureWindow();
+diff -ruN v113/src/core/store.js v123/src/core/store.js
+--- v113/src/core/store.js	2026-08-30 15:32:56.606671024 +0000
++++ v123/src/core/store.js	2026-08-30 15:32:56.610847139 +0000
+@@ -118,6 +118,23 @@
+         updated_at TEXT NOT NULL
+       );
+       CREATE INDEX IF NOT EXISTS idx_reading_favorite ON reading_list(favorite, reading);
++      CREATE TABLE IF NOT EXISTS online_library (
++        series_key TEXT PRIMARY KEY,
++        series_url TEXT NOT NULL,
++        title TEXT NOT NULL,
++        cover TEXT,
++        status TEXT,
++        language TEXT,
++        source TEXT,
++        last_chapter_title TEXT,
++        last_chapter_url TEXT,
++        last_opened_at TEXT,
++        data_json TEXT NOT NULL,
++        added_at TEXT NOT NULL,
++        updated_at TEXT NOT NULL
++      );
++      CREATE INDEX IF NOT EXISTS idx_online_library_title ON online_library(title COLLATE NOCASE);
++      CREATE INDEX IF NOT EXISTS idx_online_library_opened ON online_library(last_opened_at DESC);
+       CREATE TABLE IF NOT EXISTS news (
+         id TEXT PRIMARY KEY,
+         scan_id TEXT NOT NULL,
+@@ -434,6 +451,101 @@
+     return clone(item);
+   }
+ 
++  // Online library -----------------------------------------------------------
++  getOnlineLibraryEntry(seriesUrl) {
++    const row = this.db.prepare('SELECT data_json FROM online_library WHERE series_key=?').get(normUrl(seriesUrl));
++    return row ? clone(parseJson(row.data_json, null)) : null;
++  }
++  listOnlineLibrary({ query = '', limit = 10000 } = {}) {
++    const needle = String(query || '').trim().toLowerCase();
++    const cap = Math.max(1, Math.min(20000, Number(limit) || 10000));
++    const rows = this.db.prepare('SELECT data_json FROM online_library ORDER BY COALESCE(last_opened_at, updated_at) DESC, title COLLATE NOCASE ASC LIMIT ?').all(cap);
++    const items = rows.map((row) => parseJson(row.data_json, null)).filter(Boolean);
++    if (!needle) return items;
++    return items.filter((item) => String(item.title || '').toLowerCase().includes(needle) || String(item.seriesUrl || '').toLowerCase().includes(needle) || String(item.source || '').toLowerCase().includes(needle));
++  }
++  setOnlineLibrary(input = {}) {
++    const rawUrl = String(input.seriesUrl || input.url || '').trim();
++    if (!rawUrl) throw new Error('Serien-URL fehlt.');
++    const key = normUrl(rawUrl);
++    const current = this.getOnlineLibraryEntry(rawUrl) || {};
++    const now = new Date().toISOString();
++    const item = {
++      seriesUrl: rawUrl,
++      title: String(input.title || current.title || rawUrl).trim(),
++      cover: input.cover ?? current.cover ?? null,
++      status: input.status ?? current.status ?? 'unknown',
++      language: input.language ?? current.language ?? null,
++      source: input.source ?? current.source ?? null,
++      lastChapterTitle: Object.prototype.hasOwnProperty.call(input, 'lastChapterTitle') ? input.lastChapterTitle : (current.lastChapterTitle ?? null),
++      lastChapterUrl: Object.prototype.hasOwnProperty.call(input, 'lastChapterUrl') ? input.lastChapterUrl : (current.lastChapterUrl ?? null),
++      lastOpenedAt: Object.prototype.hasOwnProperty.call(input, 'lastOpenedAt') ? input.lastOpenedAt : (current.lastOpenedAt ?? null),
++      readChapters: Array.isArray(input.readChapters) ? input.readChapters : (Array.isArray(current.readChapters) ? current.readChapters : []),
++      addedAt: current.addedAt || now,
++      updatedAt: now
++    };
++    this.db.prepare(`INSERT INTO online_library(series_key,series_url,title,cover,status,language,source,last_chapter_title,last_chapter_url,last_opened_at,data_json,added_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
++      ON CONFLICT(series_key) DO UPDATE SET series_url=excluded.series_url,title=excluded.title,cover=excluded.cover,status=excluded.status,language=excluded.language,source=excluded.source,last_chapter_title=excluded.last_chapter_title,last_chapter_url=excluded.last_chapter_url,last_opened_at=excluded.last_opened_at,data_json=excluded.data_json,updated_at=excluded.updated_at`)
++      .run(key, item.seriesUrl, item.title, item.cover || null, String(item.status || 'unknown'), item.language || null, item.source || null, item.lastChapterTitle || null, item.lastChapterUrl || null, item.lastOpenedAt || null, toJson(item), item.addedAt, item.updatedAt);
++    return clone(item);
++  }
++  removeOnlineLibrary(seriesUrl) {
++    return this.db.prepare('DELETE FROM online_library WHERE series_key=?').run(normUrl(seriesUrl)).changes > 0;
++  }
++  _onlineChapterKey(chapter = {}) {
++    const url = normUrl(chapter.url || chapter.chapterUrl || '');
++    if (url) return `url:${url}`;
++    const id = String(chapter.id || chapter.chapterId || '').trim();
++    if (id) return `id:${id}`;
++    const title = String(chapter.title || chapter.chapterTitle || '').trim().toLowerCase();
++    return title ? `title:${title}` : '';
++  }
++  markOnlineLibraryRead(seriesUrl, chapter = {}) {
++    const current = this.getOnlineLibraryEntry(seriesUrl);
++    if (!current) return null;
++    const now = new Date().toISOString();
++    const key = this._onlineChapterKey(chapter);
++    const readChapters = Array.isArray(current.readChapters) ? [...current.readChapters] : [];
++    if (key) {
++      const record = {
++        id: String(chapter.id || chapter.chapterId || '').trim() || null,
++        title: String(chapter.title || chapter.chapterTitle || '').trim() || null,
++        url: String(chapter.url || cha
