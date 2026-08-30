@@ -1,9 +1,9 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'manhwa-watcher-pagination-v1.1.1';
-  const DEFAULT_SIZE = 50;
-  const PAGE_SIZES = [25, 50, 100, 200];
+  const STORAGE_KEY = 'manhwa-watcher-pagination-v1.1.3';
+  const DEFAULT_SIZE = 10;
+  const PAGE_SIZES = [10, 25, 50, 100];
   const sizes = loadSizes();
   const pages = { sources: 1, catalog: 1, chapters: 1 };
   const configs = {
@@ -83,9 +83,33 @@
         font-size: 10px;
       }
       .mw-page-size-label { white-space: nowrap; color: #7785aa; }
+
+      /* The Sources column is deliberately narrow. Its pager uses a compact
+         layout so page controls never overlap or get clipped. */
+      .sources-column .mw-pager {
+        grid-template-columns: 24px minmax(52px,1fr) 24px 46px;
+        gap: 3px;
+        min-height: 38px;
+        padding: 5px 4px;
+      }
+      .sources-column .mw-pager button {
+        min-width: 24px;
+        padding: 5px 4px;
+      }
+      .sources-column .mw-page-info { gap: 3px; }
+      .sources-column .mw-page-number {
+        width: 31px !important;
+        min-width: 31px;
+        padding: 4px 2px !important;
+      }
+      .sources-column .mw-page-size {
+        width: 46px;
+        padding: 4px 2px;
+      }
+
       @media (max-width: 900px) {
-        .mw-pager { grid-template-columns: auto auto minmax(100px,1fr) auto auto; }
-        .mw-page-size-label { display: none; }
+        .mw-pager:not([data-kind="sources"]) { grid-template-columns: auto auto minmax(100px,1fr) auto auto; }
+        .mw-pager:not([data-kind="sources"]) .mw-page-size-label { display: none; }
       }
     `;
     document.head.appendChild(style);
@@ -101,14 +125,22 @@
     pager = document.createElement('div');
     pager.className = 'mw-pager';
     pager.dataset.kind = kind;
-    pager.innerHTML = `
-      <button type="button" data-action="first" title="Erste Seite">«</button>
-      <button type="button" data-action="prev" title="Vorherige Seite">‹</button>
-      <span class="mw-page-info">Seite <input class="mw-page-number" type="number" min="1" value="1" aria-label="Seitennummer" /> / <span data-role="pages">1</span></span>
-      <button type="button" data-action="next" title="Nächste Seite">›</button>
-      <button type="button" data-action="last" title="Letzte Seite">»</button>
-      <label class="mw-page-size-label" title="Einträge pro Seite"><select class="mw-page-size" aria-label="Einträge pro Seite">${PAGE_SIZES.map((n) => `<option value="${n}">${n}</option>`).join('')}</select></label>
-    `;
+    const sizeOptions = PAGE_SIZES.map((n) => `<option value="${n}">${n}</option>`).join('');
+    pager.innerHTML = kind === 'sources'
+      ? `
+        <button type="button" data-action="prev" title="Vorherige Seite">‹</button>
+        <span class="mw-page-info"><input class="mw-page-number" type="number" min="1" value="1" aria-label="Seitennummer" /> / <span data-role="pages">1</span></span>
+        <button type="button" data-action="next" title="Nächste Seite">›</button>
+        <label class="mw-page-size-label" title="Einträge pro Seite"><select class="mw-page-size" aria-label="Einträge pro Seite">${sizeOptions}</select></label>
+      `
+      : `
+        <button type="button" data-action="first" title="Erste Seite">«</button>
+        <button type="button" data-action="prev" title="Vorherige Seite">‹</button>
+        <span class="mw-page-info">Seite <input class="mw-page-number" type="number" min="1" value="1" aria-label="Seitennummer" /> / <span data-role="pages">1</span></span>
+        <button type="button" data-action="next" title="Nächste Seite">›</button>
+        <button type="button" data-action="last" title="Letzte Seite">»</button>
+        <label class="mw-page-size-label" title="Einträge pro Seite"><select class="mw-page-size" aria-label="Einträge pro Seite">${sizeOptions}</select></label>
+      `;
     pager.querySelector('.mw-page-size').value = String(sizes[kind]);
 
     pager.addEventListener('click', (event) => {
@@ -160,9 +192,9 @@
     const start = (pages[kind] - 1) * pageSize;
     const end = start + pageSize;
 
-    // v1.1.2 hotfix: do not use the HTML `hidden` attribute here. The
-    // existing renderer CSS sets display:flex on rows, which can override
-    // hidden and keep every entry visible. Inline display:none wins reliably.
+    // Do not use the HTML `hidden` attribute here. The existing renderer CSS
+    // explicitly sets display:flex on rows, which overrides the browser's
+    // hidden presentation. Inline display:none reliably wins that cascade.
     rows.forEach((row, index) => {
       row.style.display = index >= start && index < end ? '' : 'none';
     });
@@ -172,10 +204,12 @@
     pager.querySelector('.mw-page-number').value = String(pages[kind]);
     pager.querySelector('.mw-page-number').max = String(totalPages);
     pager.querySelector('.mw-page-size').value = String(pageSize);
-    pager.querySelector('[data-action="first"]').disabled = pages[kind] <= 1;
+    const firstButton = pager.querySelector('[data-action="first"]');
+    if (firstButton) firstButton.disabled = pages[kind] <= 1;
     pager.querySelector('[data-action="prev"]').disabled = pages[kind] <= 1;
     pager.querySelector('[data-action="next"]').disabled = pages[kind] >= totalPages;
-    pager.querySelector('[data-action="last"]').disabled = pages[kind] >= totalPages;
+    const lastButton = pager.querySelector('[data-action="last"]');
+    if (lastButton) lastButton.disabled = pages[kind] >= totalPages;
     pager.style.display = total > 0 ? 'grid' : 'none';
     if (scrollTop) list.scrollTop = 0;
   }
@@ -260,7 +294,7 @@
     applyPagination('sources');
     applyPagination('catalog');
     applyPagination('chapters');
-    try { window.manhwaAPI?.rendererLog?.('info', 'Pagination v1.1.2 geladen', { defaultPageSize: DEFAULT_SIZE }); } catch {}
+    try { window.manhwaAPI?.rendererLog?.('info', 'Pagination v1.1.3 geladen', { defaultPageSize: DEFAULT_SIZE }); } catch {}
   }
 
   try {
