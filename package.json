@@ -1,6 +1,6 @@
 {
   "name": "manhwa-watcher",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Portable Electron manhwa watcher with paginated catalog browsing, SQLite storage, favorites/reading list, news dashboard, automatic library repair, storage dashboard, CBZ health checks, ComicInfo metadata, download queue, scheduled updates, backups, catalog/status/language filtering and Syncthing/Anyomi sync",
   "main": "src/main.js",
   "author": "Manhwa Watcher contributors",
