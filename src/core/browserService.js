@@ -2435,6 +2435,71 @@ class BrowserService {
     });
   }
 
+  async openLockedReader(rawUrl) {
+    const requestedUrl = String(rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(requestedUrl)) throw new Error('Ungültige Reader-URL.');
+
+    return this.serialize(async () => {
+      // Always start the online reader in a fresh window. A reader page may run
+      // advertising/redirect scripts after it has been visible for a while; those
+      // must never influence the next chapter the user opens.
+      let win = await this.ensureWindow({ fresh: true, preserveVisibility: false });
+      win.hide();
+      await this._navigateWindow(win, requestedUrl, { timeoutMs: 30000, settleMs: 150, bypassCache: false });
+
+      let finalUrl = String(win.webContents.getURL() || requestedUrl);
+      const compatible = (wanted, actual) => {
+        try {
+          const a = new URL(wanted); const b = new URL(actual);
+          if (a.origin !== b.origin) return false;
+          const clean = (p) => decodeURIComponent(p).replace(/\/+$/, '').toLowerCase();
+          const ap = clean(a.pathname); const bp = clean(b.pathname);
+          if (ap === bp) return true;
+          // Canonical redirects often add/remove a suffix or a trailing chapter
+          // segment. Keep them only when the meaningful path tokens still overlap.
+          const tokens = (p) => p.split('/').filter(Boolean).filter((x) => x.length > 2 && !/^(?:chapter|chap|ch|read|reader|webtoon|manga|manhwa)$/i.test(x));
+          const at = tokens(ap); const bt = new Set(tokens(bp));
+          const overlap = at.filter((x) => bt.has(x)).length;
+          const numbersA = new Set((ap.match(/\d+(?:\.\d+)?/g) || []));
+          const numbersB = new Set((bp.match(/\d+(?:\.\d+)?/g) || []));
+          const numberOverlap = [...numbersA].some((x) => numbersB.has(x));
+          return overlap >= Math.min(2, Math.max(1, at.length)) && (numbersA.size === 0 || numberOverlap);
+        } catch { return false; }
+      };
+
+      if (!compatible(requestedUrl, finalUrl)) {
+        this.logger?.warn('Online-Reader wurde unerwartet umgeleitet; Original-URL wird erneut geladen', { requestedUrl, finalUrl });
+        win = await this.ensureWindow({ fresh: true, preserveVisibility: false });
+        await this._navigateWindow(win, requestedUrl, { timeoutMs: 30000, settleMs: 80, bypassCache: true });
+        finalUrl = String(win.webContents.getURL() || requestedUrl);
+        if (!compatible(requestedUrl, finalUrl)) {
+          this.logger?.warn('Online-Reader blockiert fremde Zielseite', { requestedUrl, finalUrl });
+          try { win.destroy(); } catch {}
+          this.window = null;
+          throw new Error('Die Webseite hat den Reader auf einen anderen Titel umgeleitet. Die Navigation wurde blockiert.');
+        }
+      }
+
+      // Once the correct reader is loaded, keep this window on the same chapter.
+      // Popups are already denied globally; this additionally blocks scripts that
+      // try to replace the main document with another title/advertising route.
+      const lockedUrl = finalUrl;
+      const guard = (event, nextUrl) => {
+        if (!compatible(lockedUrl, nextUrl)) {
+          event.preventDefault();
+          this.logger?.warn('Online-Reader: unerwartete Hauptnavigation blockiert', { lockedUrl, nextUrl });
+        }
+      };
+      win.webContents.on('will-navigate', guard);
+      win.once('closed', () => { try { win.webContents?.removeListener?.('will-navigate', guard); } catch {} });
+      win.show();
+      win.focus();
+      this.lastRequestedUrl = requestedUrl;
+      this.lastLoadedUrl = finalUrl;
+      return { visible: true, url: finalUrl, title: win.webContents.getTitle() };
+    });
+  }
+
   async setVisible(visible, { fallbackUrl = null } = {}) {
     return this.serialize(async () => {
       let win = await this.ensureWindow();

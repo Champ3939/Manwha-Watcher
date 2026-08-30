@@ -118,6 +118,23 @@ class Store {
         updated_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_reading_favorite ON reading_list(favorite, reading);
+      CREATE TABLE IF NOT EXISTS online_library (
+        series_key TEXT PRIMARY KEY,
+        series_url TEXT NOT NULL,
+        title TEXT NOT NULL,
+        cover TEXT,
+        status TEXT,
+        language TEXT,
+        source TEXT,
+        last_chapter_title TEXT,
+        last_chapter_url TEXT,
+        last_opened_at TEXT,
+        data_json TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_online_library_title ON online_library(title COLLATE NOCASE);
+      CREATE INDEX IF NOT EXISTS idx_online_library_opened ON online_library(last_opened_at DESC);
       CREATE TABLE IF NOT EXISTS news (
         id TEXT PRIMARY KEY,
         scan_id TEXT NOT NULL,
@@ -434,6 +451,101 @@ class Store {
     return clone(item);
   }
 
+  // Online library -----------------------------------------------------------
+  getOnlineLibraryEntry(seriesUrl) {
+    const row = this.db.prepare('SELECT data_json FROM online_library WHERE series_key=?').get(normUrl(seriesUrl));
+    return row ? clone(parseJson(row.data_json, null)) : null;
+  }
+  listOnlineLibrary({ query = '', limit = 10000 } = {}) {
+    const needle = String(query || '').trim().toLowerCase();
+    const cap = Math.max(1, Math.min(20000, Number(limit) || 10000));
+    const rows = this.db.prepare('SELECT data_json FROM online_library ORDER BY COALESCE(last_opened_at, updated_at) DESC, title COLLATE NOCASE ASC LIMIT ?').all(cap);
+    const items = rows.map((row) => parseJson(row.data_json, null)).filter(Boolean);
+    if (!needle) return items;
+    return items.filter((item) => String(item.title || '').toLowerCase().includes(needle) || String(item.seriesUrl || '').toLowerCase().includes(needle) || String(item.source || '').toLowerCase().includes(needle));
+  }
+  setOnlineLibrary(input = {}) {
+    const rawUrl = String(input.seriesUrl || input.url || '').trim();
+    if (!rawUrl) throw new Error('Serien-URL fehlt.');
+    const key = normUrl(rawUrl);
+    const current = this.getOnlineLibraryEntry(rawUrl) || {};
+    const now = new Date().toISOString();
+    const item = {
+      seriesUrl: rawUrl,
+      title: String(input.title || current.title || rawUrl).trim(),
+      cover: input.cover ?? current.cover ?? null,
+      status: input.status ?? current.status ?? 'unknown',
+      language: input.language ?? current.language ?? null,
+      source: input.source ?? current.source ?? null,
+      lastChapterTitle: Object.prototype.hasOwnProperty.call(input, 'lastChapterTitle') ? input.lastChapterTitle : (current.lastChapterTitle ?? null),
+      lastChapterUrl: Object.prototype.hasOwnProperty.call(input, 'lastChapterUrl') ? input.lastChapterUrl : (current.lastChapterUrl ?? null),
+      lastOpenedAt: Object.prototype.hasOwnProperty.call(input, 'lastOpenedAt') ? input.lastOpenedAt : (current.lastOpenedAt ?? null),
+      readChapters: Array.isArray(input.readChapters) ? input.readChapters : (Array.isArray(current.readChapters) ? current.readChapters : []),
+      addedAt: current.addedAt || now,
+      updatedAt: now
+    };
+    this.db.prepare(`INSERT INTO online_library(series_key,series_url,title,cover,status,language,source,last_chapter_title,last_chapter_url,last_opened_at,data_json,added_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(series_key) DO UPDATE SET series_url=excluded.series_url,title=excluded.title,cover=excluded.cover,status=excluded.status,language=excluded.language,source=excluded.source,last_chapter_title=excluded.last_chapter_title,last_chapter_url=excluded.last_chapter_url,last_opened_at=excluded.last_opened_at,data_json=excluded.data_json,updated_at=excluded.updated_at`)
+      .run(key, item.seriesUrl, item.title, item.cover || null, String(item.status || 'unknown'), item.language || null, item.source || null, item.lastChapterTitle || null, item.lastChapterUrl || null, item.lastOpenedAt || null, toJson(item), item.addedAt, item.updatedAt);
+    return clone(item);
+  }
+  removeOnlineLibrary(seriesUrl) {
+    return this.db.prepare('DELETE FROM online_library WHERE series_key=?').run(normUrl(seriesUrl)).changes > 0;
+  }
+  _onlineChapterKey(chapter = {}) {
+    const url = normUrl(chapter.url || chapter.chapterUrl || '');
+    if (url) return `url:${url}`;
+    const id = String(chapter.id || chapter.chapterId || '').trim();
+    if (id) return `id:${id}`;
+    const title = String(chapter.title || chapter.chapterTitle || '').trim().toLowerCase();
+    return title ? `title:${title}` : '';
+  }
+  markOnlineLibraryRead(seriesUrl, chapter = {}) {
+    const current = this.getOnlineLibraryEntry(seriesUrl);
+    if (!current) return null;
+    const now = new Date().toISOString();
+    const key = this._onlineChapterKey(chapter);
+    const readChapters = Array.isArray(current.readChapters) ? [...current.readChapters] : [];
+    if (key) {
+      const record = {
+        id: String(chapter.id || chapter.chapterId || '').trim() || null,
+        title: String(chapter.title || chapter.chapterTitle || '').trim() || null,
+        url: String(chapter.url || chapter.chapterUrl || '').trim() || null,
+        readAt: now
+      };
+      const index = readChapters.findIndex((item) => this._onlineChapterKey(item) === key);
+      if (index >= 0) readChapters[index] = { ...readChapters[index], ...record };
+      else readChapters.push(record);
+    }
+    return this.setOnlineLibrary({
+      ...current,
+      seriesUrl: current.seriesUrl || seriesUrl,
+      lastChapterTitle: chapter.title || chapter.chapterTitle || current.lastChapterTitle || null,
+      lastChapterUrl: chapter.url || chapter.chapterUrl || current.lastChapterUrl || null,
+      lastOpenedAt: now,
+      readChapters
+    });
+  }
+  markOnlineLibraryUnread(seriesUrl, chapter = {}) {
+    const current = this.getOnlineLibraryEntry(seriesUrl);
+    if (!current) return null;
+    const key = this._onlineChapterKey(chapter);
+    if (!key) return clone(current);
+    const readChapters = (Array.isArray(current.readChapters) ? current.readChapters : [])
+      .filter((item) => this._onlineChapterKey(item) !== key);
+    const lastKey = this._onlineChapterKey({ title: current.lastChapterTitle, url: current.lastChapterUrl });
+    let lastChapterTitle = current.lastChapterTitle || null;
+    let lastChapterUrl = current.lastChapterUrl || null;
+    let lastOpenedAt = current.lastOpenedAt || null;
+    if (lastKey && lastKey === key) {
+      const newest = [...readChapters].sort((a, b) => String(b.readAt || '').localeCompare(String(a.readAt || '')))[0] || null;
+      lastChapterTitle = newest?.title || null;
+      lastChapterUrl = newest?.url || null;
+      lastOpenedAt = newest?.readAt || null;
+    }
+    return this.setOnlineLibrary({ ...current, seriesUrl: current.seriesUrl || seriesUrl, readChapters, lastChapterTitle, lastChapterUrl, lastOpenedAt });
+  }
+
   // Update news dashboard ----------------------------------------------------
   recordUpdateSummary(summary = {}) {
     const scanId = crypto.randomUUID();
@@ -494,6 +606,7 @@ class Store {
       syncSeries: this.listSyncSeries(),
       seriesStatusCache: this.listSeriesStatuses({ maxAgeMs: 0 }),
       readingList: this.listReadingList({ mode: 'all' }),
+      onlineLibrary: this.listOnlineLibrary({ limit: 20000 }),
       news: this.listNews({ latestOnly: false, limit: 2000 }),
       storage: { engine: 'sqlite', schemaVersion: 2, exportedAt: new Date().toISOString() }
     };
@@ -502,7 +615,7 @@ class Store {
   importSnapshot(snapshot, { clear = false } = {}) {
     const data = snapshot && typeof snapshot === 'object' ? snapshot : {};
     if (clear) {
-      this.db.exec('DELETE FROM settings; DELETE FROM series; DELETE FROM downloads; DELETE FROM websites; DELETE FROM sync_series; DELETE FROM series_status; DELETE FROM reading_list; DELETE FROM news;');
+      this.db.exec('DELETE FROM settings; DELETE FROM series; DELETE FROM downloads; DELETE FROM websites; DELETE FROM sync_series; DELETE FROM series_status; DELETE FROM reading_list; DELETE FROM online_library; DELETE FROM news;');
     }
     this._ensureDefaultSettings();
     this.setSettings(data.settings || {});
@@ -519,6 +632,7 @@ class Store {
     for (const item of Array.isArray(data.syncSeries) ? data.syncSeries : []) this.setSeriesSync({ ...item, enabled: true });
     for (const item of Array.isArray(data.seriesStatusCache) ? data.seriesStatusCache : []) this.setSeriesStatus(item.seriesUrl, item.status, item);
     for (const item of Array.isArray(data.readingList) ? data.readingList : []) this.setReadingList(item);
+    for (const item of Array.isArray(data.onlineLibrary) ? data.onlineLibrary : []) this.setOnlineLibrary(item);
     // Legacy snapshots did not have a news feed. New snapshots do; import the rows directly.
     for (const item of Array.isArray(data.news) ? data.news : []) {
       const scanId = item.scanId || 'imported'; const id = item.id || crypto.randomUUID();

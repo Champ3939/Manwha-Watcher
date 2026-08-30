@@ -232,6 +232,45 @@ function registerIpc(connectorDir) {
   ipcMain.handle('reading-list:list', (_event, mode) => store.listReadingList({ mode: String(mode || 'all') }));
   ipcMain.handle('reading-list:get', (_event, url) => store.getReadingListEntry(String(url || '')));
   ipcMain.handle('reading-list:set', (_event, data) => store.setReadingList(data || {}));
+  ipcMain.handle('online-library:list', (_event, options) => store.listOnlineLibrary({ query: String(options?.query || ''), limit: Number(options?.limit) || 10000 }));
+  ipcMain.handle('online-library:get', (_event, url) => store.getOnlineLibraryEntry(String(url || '')));
+  ipcMain.handle('online-library:set', (_event, data) => store.setOnlineLibrary(data || {}));
+  ipcMain.handle('online-library:remove', (_event, url) => store.removeOnlineLibrary(String(url || '')));
+  ipcMain.handle('online-library:mark-read', (_event, data) => store.markOnlineLibraryRead(String(data?.seriesUrl || ''), { id: data?.chapterId || null, title: data?.chapterTitle || null, url: data?.chapterUrl || null }));
+  ipcMain.handle('online-library:mark-unread', (_event, data) => store.markOnlineLibraryUnread(String(data?.seriesUrl || ''), { id: data?.chapterId || null, title: data?.chapterTitle || null, url: data?.chapterUrl || null }));
+  ipcMain.handle('reader:open', async (_event, rawUrl) => {
+    const url = String(rawUrl || '').trim();
+    if (!/^https?:\/\//i.test(url)) throw new Error('Ungültige Reader-URL.');
+    logger.info('Online-Reader wird geöffnet', { url });
+    return browserService.openLockedReader(url);
+  });
+  ipcMain.handle('reader:open-chapter', async (_event, data) => {
+    const seriesUrl = String(data?.seriesUrl || '').trim();
+    const chapterId = String(data?.chapterId || '').trim();
+    const candidateUrl = String(data?.chapterUrl || '').trim();
+    if (!seriesUrl || !chapterId) throw new Error('Serie oder Kapitel fehlt.');
+    const connector = connectors.getForUrl(seriesUrl);
+    if (!connector) throw new Error(unsupportedMessage(seriesUrl));
+
+    // Resolve the chapter again from the source every time. Some sites mutate the
+    // visible reader page or redirect the embedded browser after it has been open;
+    // reusing a stale URL can therefore open a different title on the second click.
+    const info = await connector.getSeriesInfo(seriesUrl);
+    const chapters = Array.isArray(info?.chapters) ? info.chapters : [];
+    let chapter = chapters.find((entry) => String(entry.id) === chapterId);
+    if (!chapter && candidateUrl) chapter = chapters.find((entry) => entry?.url && sameUrl(entry.url, candidateUrl));
+    if (!chapter) {
+      const wantedTitle = String(data?.chapterTitle || '').trim().toLowerCase();
+      if (wantedTitle) chapter = chapters.find((entry) => String(entry?.title || '').trim().toLowerCase() === wantedTitle);
+    }
+    if (!chapter?.url) throw new Error('Kapitel wurde auf der Serienseite nicht mehr gefunden. Bitte die Serie neu laden.');
+
+    logger.info('Online-Reader: Kapitel frisch aufgelöst', {
+      seriesUrl, chapterId, requestedUrl: candidateUrl || null, resolvedUrl: chapter.url, title: chapter.title
+    });
+    const opened = await browserService.openLockedReader(chapter.url);
+    return { ...opened, chapterId: String(chapter.id), chapterTitle: chapter.title || data?.chapterTitle || `Chapter ${chapterId}`, url: opened?.url || chapter.url };
+  });
   ipcMain.handle('news:list', (_event, options) => ({ items: store.listNews({ latestOnly: options?.latestOnly !== false, limit: Number(options?.limit) || 300 }), summary: store.getNewsSummary() }));
   ipcMain.handle('news:summary', () => store.getNewsSummary());
   ipcMain.handle('news:mark-seen', (_event, options) => store.markNewsSeen({ latestOnly: options?.latestOnly !== false }));

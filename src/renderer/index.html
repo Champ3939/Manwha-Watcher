@@ -3,19 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Manhwa Watcher v1.1.0</title>
+  <title>Manhwa Watcher v1.2.3</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <div>
-      <div class="eyebrow" id="versionLabel">v1.1.0 · Stable</div>
+      <div class="eyebrow" id="versionLabel">v1.2.3 · Online Library</div>
       <h1>Manhwa Watcher</h1>
       <p>Quelle auswählen, einzelne Serien laden oder einen kompletten Katalog als CBZ-Archiv herunterladen.</p>
     </div>
     <div class="header-actions">
       <button id="updateScanBtn" class="accent">Updates scannen</button>
       <button id="newsToggleBtn" class="secondary">Neuheiten</button>
+      <button id="onlineLibraryToggleBtn" class="secondary">Online-Bibliothek</button>
       <button id="phoneSyncToggleBtn" class="secondary">Handy-Sync</button>
       <button id="websitesToggleBtn" class="secondary">Webseiten</button>
       <button id="labToggleBtn" class="secondary">Connector-Labor</button>
@@ -131,6 +132,7 @@
             <div class="selected-series-actions">
               <button id="favoriteSelectedBtn" class="secondary" disabled>☆ Favorit</button>
               <button id="readingSelectedBtn" class="secondary" disabled>📖 Leseliste</button>
+              <button id="onlineLibrarySelectedBtn" class="secondary" disabled>☁ Merken</button>
               <button id="watchSelectedBtn" class="secondary" disabled>Beobachten</button>
               <button id="syncSelectedBtn" class="secondary" disabled>📱 Sync</button>
               <button id="labSelectedBtn" class="secondary" disabled>Connector</button>
@@ -335,6 +337,30 @@
         <span class="subtle">Zeigt nur Serien, bei denen der letzte Update-Scan neue Kapitel gefunden hat.</span>
       </div>
       <div id="newsList" class="news-list"><div class="empty compact">Nach dem nächsten Update-Scan erscheinen neue Kapitel hier.</div></div>
+    </section>
+
+    <section id="onlineLibraryPanel" class="debug-panel hidden">
+      <div class="panel-head compact">
+        <div>
+          <div class="eyebrow">Online Library</div>
+          <h2>Titel speichern, ohne Kapitel herunterzuladen</h2>
+          <div id="onlineLibrarySummary" class="subtle">Nur Metadaten und Links werden gespeichert. Kapitel werden erst beim Öffnen live von der Quelle geladen.</div>
+        </div>
+        <div class="engine-actions">
+          <button id="refreshOnlineLibraryBtn" class="secondary">Aktualisieren</button>
+          <button id="closeOnlineLibraryBtn" class="secondary">Schließen</button>
+        </div>
+      </div>
+      <div class="online-library-toolbar">
+        <input id="onlineLibrarySearch" type="search" autocomplete="off" placeholder="Gespeicherte Titel durchsuchen …" />
+        <span id="onlineLibraryCount" class="pill">0 Titel</span>
+      </div>
+      <div id="onlineLibraryList" class="online-library-list"><div class="empty compact">Noch keine Titel gespeichert. Öffne eine Serie und klicke auf „☁ Merken“.</div></div>
+      <div class="online-library-pager">
+        <button id="onlineLibraryPrevBtn" class="secondary">‹</button>
+        <span>Seite <strong id="onlineLibraryPage">1</strong> / <strong id="onlineLibraryPages">1</strong></span>
+        <button id="onlineLibraryNextBtn" class="secondary">›</button>
+      </div>
     </section>
 
     <section id="downloadsPanel" class="debug-panel hidden">

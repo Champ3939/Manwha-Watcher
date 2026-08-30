@@ -674,3 +674,12 @@ License
 Manhwa Watcher is distributed under the MIT License.
 
 Third-party components such as Electron/Chromium are distributed under their respective licenses included with the application.
+
+
+---
+
+## Online Library (v1.2.3)
+
+The **Online Library** lets you save large numbers of titles without downloading every chapter. Use **☁ Merken** on a series, open saved titles from **Online-Bibliothek**, and use **Lesen** to read chapters live in the integrated Chromium reader.
+
+Read chapters are tracked as lightweight SQLite metadata and shown with `✓ GELESEN`; no CBZ or chapter images are stored by the online-reading feature. Offline CBZ downloads and Syncthing/Aniyomi sync remain available separately.

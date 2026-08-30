@@ -369,3 +369,60 @@ button.sync-active { background:#245b42; color:#baf1cf; }
 .news-badge { padding:4px 8px; border-radius:999px; background:#173e30; color:#8ee7b6; font-size:10px; font-weight:800; white-space:nowrap; }
 .news-row button { padding:7px 9px; font-size:10px; }
 @media (max-width:900px) { .news-row { grid-template-columns:1fr auto; } .news-copy { grid-column:1 / -1; } }
+
+
+/* v1.2.0 – Online Library */
+.online-library-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.online-library-toolbar input { flex:1; min-width:180px; }
+.online-library-toolbar .pill { margin-left:0; }
+.online-library-list { display:grid; gap:7px; }
+.online-library-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto auto; gap:9px; align-items:center; padding:9px 10px; border:1px solid #263452; border-radius:10px; background:#0b1224; }
+.online-library-cover { width:42px; height:58px; object-fit:cover; border-radius:6px; background:#151d31; }
+.online-library-copy { min-width:0; }
+.online-library-copy strong { display:block; color:#e7ebfb; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.online-library-copy small { display:block; margin-top:3px; color:#7f8caf; font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.online-library-copy small.online-library-last { color:#8ed1ab; }
+.online-library-row button { padding:7px 9px; font-size:10px; white-space:nowrap; }
+.online-library-pager { display:flex; justify-content:center; align-items:center; gap:10px; margin-top:10px; color:#9aa6c8; font-size:11px; }
+.online-library-pager button { min-width:36px; padding:7px 10px; }
+button.online-read { background:#283b5a; color:#bcd7ff; }
+@media (max-width:900px) { .online-library-row { grid-template-columns:auto minmax(0,1fr) auto; } .online-library-row button { grid-row:auto; } }
+
+
+/* v1.2.2 – Online-Lesestatus pro Kapitel */
+.catalog-chapter-row.online-read-done { background:rgba(55,135,91,.065); box-shadow:inset 3px 0 rgba(83,191,126,.52); }
+.catalog-chapter-row.online-read-done:hover { background:rgba(55,135,91,.105); }
+.online-read-badge { display:inline-flex; align-items:center; margin-left:5px; padding:1px 5px; border-radius:999px; border:1px solid rgba(91,215,139,.36); background:rgba(65,190,112,.14); color:#8ee7b6; font-size:8px; font-weight:800; vertical-align:1px; }
+.catalog-chapter-copy small.read-done { color:#82d8a5; }
+button.online-read-status { background:#173e30; color:#8ee7b6; border:1px solid #285f4a; }
+
+
+/* v1.2.3 – Selected-series action bar overflow fix */
+.selected-series-head {
+  flex-wrap: wrap;
+}
+.selected-series-head > div:first-child {
+  flex: 1 1 250px;
+  min-width: 0;
+}
+.selected-series-actions {
+  flex: 1 1 300px;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: flex-start;
+  gap: 5px;
+}
+.selected-series-actions button {
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 6px 8px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .selected-series-actions {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
