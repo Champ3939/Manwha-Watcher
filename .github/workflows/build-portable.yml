@@ -1,4 +1,4 @@
-name: Build portable Windows EXE
+name: Build Windows downloads
 
 on:
   push:
@@ -32,14 +32,74 @@ jobs:
         shell: pwsh
         run: npm run check
 
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Build portable EXE
         shell: pwsh
-        run: npm run dist
+        run: |
+          npm run dist
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\portable" | Out-Null
+          Copy-Item "dist\*.exe" "$env:RUNNER_TEMP\portable\" -Force
+
+      - name: Build unpacked Windows x64 folder
+        shell: pwsh
+        run: npx electron-builder --dir --win --x64
+
+      - name: Create Windows x64 ZIP like the classic package
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $folderName = "Manhwa-Watcher-v$version-Windows-x64"
+          $releaseBase = Join-Path $PWD "release"
+          $releaseRoot = Join-Path $releaseBase $folderName
+          $dataDir = Join-Path $releaseRoot "Manhwa-Watcher-Data"
+
+          if (Test-Path $releaseBase) { Remove-Item $releaseBase -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+          Copy-Item "dist\win-unpacked\*" $releaseRoot -Recurse -Force
+
+          @"
+          Manhwa Watcher v$version
+          =====================
+
+          1. "Manhwa Watcher.exe" starten.
+          2. Der Ordner "Manhwa-Watcher-Data" liegt bereits neben der EXE und wird fuer Bibliothek, Lesestatus, Einstellungen und weitere Laufzeitdaten verwendet.
+          3. Wenn du schon einen bestehenden Manhwa-Watcher-Data-Ordner hast, kannst du dessen Inhalt in diesen Ordner uebernehmen.
+          4. Diese Windows-x64-Ausgabe enthaelt den gleichen entpackten Aufbau wie die bisherigen ZIP-Pakete.
+
+          Version: $version
+          "@ | Set-Content -Path (Join-Path $releaseRoot "README-START.txt") -Encoding UTF8
+
+          Set-Content -Path (Join-Path $releaseRoot "version") -Value $version -Encoding ASCII
+
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          @"
+          Dieser Ordner ist absichtlich Bestandteil des Pakets.
+          Manhwa Watcher speichert hier seine lokalen Laufzeitdaten.
+          Eigene library.db, Logs und persoenliche Bibliotheksdaten gehoeren nicht ins GitHub-Repository.
+          "@ | Set-Content -Path (Join-Path $dataDir "README.txt") -Encoding UTF8
+
+          Push-Location $releaseBase
+          Compress-Archive -Path $folderName -DestinationPath "$folderName.zip" -CompressionLevel Optimal -Force
+          Pop-Location
 
       - name: Upload portable EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Manhwa-Watcher-portable
-          path: dist/*.exe
+          name: Manhwa-Watcher-v${{ steps.version.outputs.version }}-portable
+          path: ${{ runner.temp }}/portable/*.exe
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
+
+      - name: Upload Windows x64 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Manhwa-Watcher-v${{ steps.version.outputs.version }}-Windows-x64
+          path: release/Manhwa-Watcher-v${{ steps.version.outputs.version }}-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
