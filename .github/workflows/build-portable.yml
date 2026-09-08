@@ -48,7 +48,7 @@ jobs:
 
       - name: Build unpacked Windows x64 folder
         shell: pwsh
-        run: npx electron-builder --dir --win --x64
+        run: npx electron-builder --dir --win --x64 --config.asar=false
 
       - name: Create Windows x64 ZIP like the classic package
         shell: pwsh
@@ -70,7 +70,7 @@ jobs:
           1. "Manhwa Watcher.exe" starten.
           2. Der Ordner "Manhwa-Watcher-Data" liegt bereits neben der EXE und wird fuer Bibliothek, Lesestatus, Einstellungen und weitere Laufzeitdaten verwendet.
           3. Wenn du schon einen bestehenden Manhwa-Watcher-Data-Ordner hast, kannst du dessen Inhalt in diesen Ordner uebernehmen.
-          4. Diese Windows-x64-Ausgabe enthaelt den gleichen entpackten Aufbau wie die bisherigen ZIP-Pakete.
+          4. Diese Windows-x64-Ausgabe enthaelt den gleichen entpackten Aufbau wie die bisherigen ZIP-Pakete, inklusive sichtbarem Quellcode unter resources/app.
 
           Version: $version
           "@ | Set-Content -Path (Join-Path $releaseRoot "README-START.txt") -Encoding UTF8
