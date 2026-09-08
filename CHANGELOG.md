@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.4 – Mixed Chapter Fix
+
+- Fix: Auto-detection now filters chapter links by the opened series instead of accepting unrelated chapter blocks from recommendations or "latest chapters" sections.
+- Chapter URLs are grouped by series/path family and ranked against the opened series URL and title.
+- Cross-domain chapter links are ignored during auto-detection.
+- Ambiguous sites keep the previous behavior rather than aggressively hiding potentially valid chapters.
+- No database migration is required; existing `Manhwa-Watcher-Data` remains compatible.
+
 ## v1.2.3 – Layout Fix
 
 - Fix: Die Aktionsbuttons im Kopf der Kapitelspalte laufen nicht mehr über den rechten Rand.
