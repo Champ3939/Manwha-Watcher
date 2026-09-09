@@ -1,0 +1,226 @@
+name: Apply v1.2.7 Toomics runtime fix once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch Toomics runtime and cover fallback
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          # browserService.js
+          p = Path('src/core/browserService.js')
+          s = p.read_text(encoding='utf-8')
+
+          class_marker = '\nclass BrowserService {\n'
+          helper = r'''
+
+function extractToomicsEpisodesFromHtml(html, baseUrl, toonId, language = null) {
+  const source = String(html || '')
+    .replace(/\\u002f/gi, '/')
+    .replace(/\\\//g, '/')
+    .replace(/&amp;/gi, '&');
+  const rows = new Map();
+  const routeRx = /(?:https?:\/\/[^\s"'<>]+)?(\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/detail\/code\/(\d+)\/ep\/(\d+)\/toon\/(\d+))/gi;
+  let match;
+  while ((match = routeRx.exec(source))) {
+    if (toonId && String(match[4]) !== String(toonId)) continue;
+    const number = Number(match[3]);
+    if (!Number.isFinite(number)) continue;
+    let url;
+    try { url = new URL(match[1], baseUrl).href.replace(/#.*$/, ''); } catch { continue; }
+    const item = {
+      id: String(number),
+      title: `Folge ${number}`,
+      url,
+      number,
+      downloaded: false,
+      score: 180,
+      language
+    };
+    const old = rows.get(url);
+    if (!old || item.score > old.score) rows.set(url, item);
+  }
+  return [...rows.values()].sort((a, b) => a.number - b.number);
+}
+'''
+          if 'function extractToomicsEpisodesFromHtml' not in s:
+              if class_marker not in s:
+                  raise SystemExit('BrowserService class marker missing')
+              s = s.replace(class_marker, helper + class_marker, 1)
+
+          # Remove the v1.2.6 nested Toomics block that breaks after template-literal cooking.
+          series_pos = s.index('async discoverSeriesInfo')
+          block_start_text = '        // Toomics renders episode rows through JavaScript and some variants do not'
+          block_start = s.find(block_start_text, series_pos)
+          if block_start >= 0:
+              block_end = s.index('        let chapters = [...rows.values()];', block_start)
+              s = s[:block_start] + s[block_end:]
+
+          old_check = """      if (!Array.isArray(result?.chapters) || !result.chapters.length) {
+        throw new Error('Automatische Erkennung konnte auf dieser Serienseite keine Kapitel finden.');
+      }
+"""
+          fallback = r'''      // Toomics may keep episode routes only in data/onclick markup. Parse the rendered
+      // HTML in the main process so nested executeJavaScript escaping cannot break the scraper.
+      try {
+        const finalUrl = String(result?.url || win.webContents.getURL() || target);
+        const parsed = new URL(finalUrl);
+        if (/^(?:www\.|global\.|comics\.)?toomics\.com$/i.test(parsed.hostname)) {
+          const toonMatch = parsed.pathname.match(/\/webtoon\/episode\/toon\/(\d+)/i);
+          const toonId = toonMatch?.[1] || null;
+          if (toonId) {
+            const html = await win.webContents.executeJavaScript('document.documentElement ? document.documentElement.outerHTML : ""', true);
+            const detected = extractToomicsEpisodesFromHtml(html, finalUrl, toonId, result?.pageLanguage || result?.language || null);
+            if (detected.length) {
+              const merged = new Map((Array.isArray(result.chapters) ? result.chapters : []).map((chapter) => [String(chapter.url || chapter.id), chapter]));
+              for (const chapter of detected) merged.set(String(chapter.url || chapter.id), chapter);
+              result.chapters = [...merged.values()].sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER));
+            }
+          }
+        }
+      } catch (error) {
+        this.logger?.debug?.('Toomics-Kapitel-Fallback fehlgeschlagen', { url: target, message: error.message });
+      }
+
+      if (!Array.isArray(result?.chapters) || !result.chapters.length) {
+        throw new Error('Automatische Erkennung konnte auf dieser Serienseite keine Kapitel finden.');
+      }
+'''
+          if 'Toomics may keep episode routes only in data/onclick markup' not in s:
+              if old_check not in s:
+                  raise SystemExit('Series validation anchor missing')
+              s = s.replace(old_check, fallback, 1)
+
+          method_anchor = '  async selfTest() {\n'
+          image_method = r'''  async fetchImageDataUrl(url, { referer = null } = {}) {
+    const target = String(url || '').trim();
+    if (!/^https?:\/\//i.test(target)) throw new Error('Ungültige Bild-URL.');
+    const { buffer, contentType } = await this.fetchBinary(target, { referer });
+    if (!buffer?.length) throw new Error('Bild konnte nicht geladen werden.');
+    if (buffer.length > 15 * 1024 * 1024) throw new Error('Cover ist ungewöhnlich groß.');
+    let mime = String(contentType || '').split(';')[0].trim().toLowerCase();
+    if (!/^image\//i.test(mime)) {
+      const pathname = (() => { try { return new URL(target).pathname.toLowerCase(); } catch { return ''; } })();
+      mime = pathname.endsWith('.png') ? 'image/png'
+        : pathname.endsWith('.webp') ? 'image/webp'
+        : pathname.endsWith('.gif') ? 'image/gif'
+        : pathname.endsWith('.avif') ? 'image/avif'
+        : 'image/jpeg';
+    }
+    return `data:${mime};base64,${buffer.toString('base64')}`;
+  }
+
+'''
+          if 'async fetchImageDataUrl(' not in s:
+              if method_anchor not in s:
+                  raise SystemExit('selfTest anchor missing')
+              s = s.replace(method_anchor, image_method + method_anchor, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # main.js
+          p = Path('src/main.js')
+          s = p.read_text(encoding='utf-8')
+          anchor = "  ipcMain.handle('catalog:debug-status', async (_event, rawUrl) => {\n"
+          handler = r'''  ipcMain.handle('catalog:cover-data', async (_event, data) => {
+    const url = String(data?.url || '').trim();
+    const referer = String(data?.referer || '').trim() || null;
+    if (!url) return null;
+    try {
+      return await browserService.fetchImageDataUrl(url, { referer });
+    } catch (error) {
+      logger.debug?.('Katalog-Cover konnte nicht über Browser-Session geladen werden', { url, referer, message: error.message });
+      return null;
+    }
+  });
+'''
+          if "catalog:cover-data" not in s:
+              if anchor not in s:
+                  raise SystemExit('main cover IPC anchor missing')
+              s = s.replace(anchor, handler + anchor, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # preload.js
+          p = Path('src/preload.js')
+          s = p.read_text(encoding='utf-8')
+          anchor = "  catalogDiscover: (data) => ipcRenderer.invoke('catalog:discover', data),\n"
+          if 'catalogCoverData:' not in s:
+              if anchor not in s:
+                  raise SystemExit('preload catalog anchor missing')
+              s = s.replace(anchor, anchor + "  catalogCoverData: (data) => ipcRenderer.invoke('catalog:cover-data', data),\n", 1)
+          p.write_text(s, encoding='utf-8')
+
+          # renderer/app.js
+          p = Path('src/renderer/app.js')
+          s = p.read_text(encoding='utf-8')
+          old = """      const img = document.createElement('img'); img.className = 'title-cover'; img.src = item.cover; img.alt = ''; img.loading = 'lazy';
+      img.addEventListener('error', () => img.remove());
+      card.appendChild(img);
+"""
+          new = """      const img = document.createElement('img'); img.className = 'title-cover'; img.src = item.cover; img.alt = ''; img.loading = 'lazy';
+      img.addEventListener('error', async () => {
+        if (img.dataset.proxyTried === '1') { img.remove(); return; }
+        img.dataset.proxyTried = '1';
+        try {
+          const referer = lastCatalogResult?.pageUrl || normalizeBrowseUrl($('#browseUrl')?.value || '') || item.url;
+          const dataUrl = await window.manhwaAPI.catalogCoverData({ url: item.cover, referer });
+          if (dataUrl) { img.src = dataUrl; return; }
+        } catch {}
+        img.remove();
+      });
+      card.appendChild(img);
+"""
+          if 'img.dataset.proxyTried' not in s:
+              if old not in s:
+                  raise SystemExit('renderer cover anchor missing')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          pkg = Path('package.json')
+          data = json.loads(pkg.read_text(encoding='utf-8'))
+          data['version'] = '1.2.7'
+          pkg.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          Path('RELEASE_NOTES_v1.2.7.md').write_text('''# Manhwa Watcher v1.2.7\n\n## Toomics runtime fix\n\n- Removes the nested Toomics regex that caused Electron executeJavaScript to fail at runtime.\n- Parses Toomics episode routes in the main process instead of inside the renderer script.\n- Keeps Toomics episode detection for /webtoon/detail/code/<code>/ep/<episode>/toon/<toonId>.\n- Adds a BrowserSession-backed cover fallback for Toomics cover images that require cookies/referer.\n- Keeps the v1.2.6 lazy-cover detection, v1.2.5 catalog fixes and v1.2.4 mixed-chapter protection.\n''', encoding='utf-8')
+          PY
+
+          node --check src/core/browserService.js
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer/app.js
+
+          # Compile the actual cooked script passed to Electron, not only the outer file.
+          node <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('src/core/browserService.js', 'utf8');
+          const a = s.indexOf('async discoverSeriesInfo');
+          const marker = 'const result = await win.webContents.executeJavaScript(`';
+          const b = s.indexOf(marker, a) + marker.length;
+          const c = s.indexOf('`, true);', b);
+          if (a < 0 || b < marker.length || c < 0) throw new Error('discoverSeriesInfo script not found');
+          const raw = s.slice(b, c);
+          const cooked = new Function('return `'+raw.replace(/`/g,'\\`')+'`;')();
+          new Function(cooked);
+          console.log('discoverSeriesInfo runtime script OK');
+          NODE
+
+          git config user.name "Champ3939"
+          git config user.email "166837043+Champ3939@users.noreply.github.com"
+          git add src/core/browserService.js src/main.js src/preload.js src/renderer/app.js package.json RELEASE_NOTES_v1.2.7.md
+          git rm .github/workflows/fix-toomics-runtime-once.yml
+          git commit -m "v1.2.7: Fix Toomics runtime chapters and covers"
+          git push origin main
