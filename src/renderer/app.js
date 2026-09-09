@@ -896,7 +896,16 @@ function renderCatalog(items = catalogItems) {
     card.className = `title-row${selectedCatalog?.series?.url === item.url ? ' active' : ''}`;
     if (item.cover) {
       const img = document.createElement('img'); img.className = 'title-cover'; img.src = item.cover; img.alt = ''; img.loading = 'lazy';
-      img.addEventListener('error', () => img.remove());
+      img.addEventListener('error', async () => {
+        if (img.dataset.proxyTried === '1') { img.remove(); return; }
+        img.dataset.proxyTried = '1';
+        try {
+          const referer = lastCatalogResult?.pageUrl || normalizeBrowseUrl($('#browseUrl')?.value || '') || item.url;
+          const dataUrl = await window.manhwaAPI.catalogCoverData({ url: item.cover, referer });
+          if (dataUrl) { img.src = dataUrl; return; }
+        } catch {}
+        img.remove();
+      });
       card.appendChild(img);
     }
     const copy = document.createElement('span'); copy.className = 'title-row-copy';

@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('manhwaAPI', {
   labOpenDevTools: () => ipcRenderer.invoke('lab:devtools'),
   labAnalyze: (data) => ipcRenderer.invoke('lab:analyze', data),
   catalogDiscover: (data) => ipcRenderer.invoke('catalog:discover', data),
+  catalogCoverData: (data) => ipcRenderer.invoke('catalog:cover-data', data),
   catalogRefreshStatuses: (data) => ipcRenderer.invoke('catalog:refresh-statuses', data),
   catalogDebugStatus: (url) => ipcRenderer.invoke('catalog:debug-status', url),
   catalogOpenSeries: (url) => ipcRenderer.invoke('catalog:open-series', url),

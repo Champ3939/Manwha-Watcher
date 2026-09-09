@@ -247,6 +247,36 @@ function extractReaderPagesFromHtml(html, baseUrl) {
   }));
 }
 
+
+function extractToomicsEpisodesFromHtml(html, baseUrl, toonId, language = null) {
+  const source = String(html || '')
+    .replace(/\\u002f/gi, '/')
+    .replace(/\\\//g, '/')
+    .replace(/&amp;/gi, '&');
+  const rows = new Map();
+  const routeRx = /(?:https?:\/\/[^\s"'<>]+)?(\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/detail\/code\/(\d+)\/ep\/(\d+)\/toon\/(\d+))/gi;
+  let match;
+  while ((match = routeRx.exec(source))) {
+    if (toonId && String(match[4]) !== String(toonId)) continue;
+    const number = Number(match[3]);
+    if (!Number.isFinite(number)) continue;
+    let url;
+    try { url = new URL(match[1], baseUrl).href.replace(/#.*$/, ''); } catch { continue; }
+    const item = {
+      id: String(number),
+      title: `Folge ${number}`,
+      url,
+      number,
+      downloaded: false,
+      score: 180,
+      language
+    };
+    const old = rows.get(url);
+    if (!old || item.score > old.score) rows.set(url, item);
+  }
+  return [...rows.values()].sort((a, b) => a.number - b.number);
+}
+
 class BrowserService {
   constructor({ partition = 'persist:manhwa-watcher-web', onEvent = () => {}, logger = null } = {}) {
     this.partition = partition;
@@ -1866,41 +1896,6 @@ class BrowserService {
           const item = { id, title: chapterTitle, url: href, number: Number.isFinite(number) ? number : null, downloaded: false, score, language: languageForNode(a) };
           if (!existing || item.score > existing.score || item.title.length < existing.title.length) rows.set(href, item);
         }
-        // Toomics renders episode rows through JavaScript and some variants do not
-  // expose the chapter URL as a normal <a href>. The canonical reader route
-  // is /<lang>/webtoon/detail/code/<code>/ep/<episode>/toon/<toonId>.
-  // Scan the serialized DOM too so data attributes / onclick markup are covered.
-  if (/^(?:www\.|global\.|comics\.)?toomics\.com$/i.test(location.hostname)) {
-    const toonMatch = location.pathname.match(/\/webtoon\/episode\/toon\/(\d+)/i);
-    const toonId = toonMatch?.[1] || null;
-    if (toonId) {
-      const markup = String(document.documentElement?.innerHTML || '')
-        .replace(/\\u002f/gi, '/')
-        .replace(/\\\//g, '/')
-        .replace(/&amp;/gi, '&');
-      const routeRx = /(?:https?:\/\/[^\s"'<>]+)?(\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/detail\/code\/(\d+)\/ep\/(\d+)\/toon\/(\d+))/gi;
-      let m;
-      while ((m = routeRx.exec(markup))) {
-        if (String(m[4]) !== String(toonId)) continue;
-        const number = Number(m[3]);
-        if (!Number.isFinite(number)) continue;
-        const href = abs(m[1]);
-        if (!href) continue;
-        const existing = rows.get(href);
-        const item = {
-          id: String(number),
-          title: 'Folge ' + number,
-          url: href,
-          number,
-          downloaded: false,
-          score: 180,
-          language: pageLanguage
-        };
-        if (!existing || item.score > existing.score) rows.set(href, item);
-      }
-    }
-  }
-
         let chapters = [...rows.values()];
         const numeric = chapters.filter((c) => Number.isFinite(c.number));
         if (numeric.length >= Math.max(3, Math.floor(chapters.length * 0.55))) {
@@ -1908,6 +1903,28 @@ class BrowserService {
         }
         return { title, url: location.href, cover, chapters, language: pageLanguage, pageLanguage, status: pageStatus, detected: true, pageTitle: document.title, hostname: location.hostname };
       })()`, true);
+      // Toomics may keep episode routes only in data/onclick markup. Parse the rendered
+      // HTML in the main process so nested executeJavaScript escaping cannot break the scraper.
+      try {
+        const finalUrl = String(result?.url || win.webContents.getURL() || target);
+        const parsed = new URL(finalUrl);
+        if (/^(?:www\.|global\.|comics\.)?toomics\.com$/i.test(parsed.hostname)) {
+          const toonMatch = parsed.pathname.match(/\/webtoon\/episode\/toon\/(\d+)/i);
+          const toonId = toonMatch?.[1] || null;
+          if (toonId) {
+            const html = await win.webContents.executeJavaScript('document.documentElement ? document.documentElement.outerHTML : ""', true);
+            const detected = extractToomicsEpisodesFromHtml(html, finalUrl, toonId, result?.pageLanguage || result?.language || null);
+            if (detected.length) {
+              const merged = new Map((Array.isArray(result.chapters) ? result.chapters : []).map((chapter) => [String(chapter.url || chapter.id), chapter]));
+              for (const chapter of detected) merged.set(String(chapter.url || chapter.id), chapter);
+              result.chapters = [...merged.values()].sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER));
+            }
+          }
+        }
+      } catch (error) {
+        this.logger?.debug?.('Toomics-Kapitel-Fallback fehlgeschlagen', { url: target, message: error.message });
+      }
+
       if (!Array.isArray(result?.chapters) || !result.chapters.length) {
         throw new Error('Automatische Erkennung konnte auf dieser Serienseite keine Kapitel finden.');
       }
@@ -2633,6 +2650,24 @@ class BrowserService {
       const contentType = Array.isArray(rawContentType) ? String(rawContentType[0] || '') : String(rawContentType || '');
       return { buffer: response.buffer, contentType };
     }
+  }
+
+  async fetchImageDataUrl(url, { referer = null } = {}) {
+    const target = String(url || '').trim();
+    if (!/^https?:\/\//i.test(target)) throw new Error('Ungültige Bild-URL.');
+    const { buffer, contentType } = await this.fetchBinary(target, { referer });
+    if (!buffer?.length) throw new Error('Bild konnte nicht geladen werden.');
+    if (buffer.length > 15 * 1024 * 1024) throw new Error('Cover ist ungewöhnlich groß.');
+    let mime = String(contentType || '').split(';')[0].trim().toLowerCase();
+    if (!/^image\//i.test(mime)) {
+      const pathname = (() => { try { return new URL(target).pathname.toLowerCase(); } catch { return ''; } })();
+      mime = pathname.endsWith('.png') ? 'image/png'
+        : pathname.endsWith('.webp') ? 'image/webp'
+        : pathname.endsWith('.gif') ? 'image/gif'
+        : pathname.endsWith('.avif') ? 'image/avif'
+        : 'image/jpeg';
+    }
+    return `data:${mime};base64,${buffer.toString('base64')}`;
   }
 
   async selfTest() {

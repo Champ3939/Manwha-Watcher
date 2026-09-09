@@ -422,6 +422,17 @@ function registerIpc(connectorDir) {
     });
     return enriched;
   });
+  ipcMain.handle('catalog:cover-data', async (_event, data) => {
+    const url = String(data?.url || '').trim();
+    const referer = String(data?.referer || '').trim() || null;
+    if (!url) return null;
+    try {
+      return await browserService.fetchImageDataUrl(url, { referer });
+    } catch (error) {
+      logger.debug?.('Katalog-Cover konnte nicht über Browser-Session geladen werden', { url, referer, message: error.message });
+      return null;
+    }
+  });
   ipcMain.handle('catalog:debug-status', async (_event, rawUrl) => {
     const url = String(rawUrl || '').trim();
     if (!url) throw new Error('Keine Serien-URL für Status-Debug angegeben.');
