@@ -82,9 +82,9 @@ function normalizeDetectedStatus(value) {
   if (/\b(?:cancelled|canceled|discontinued|axed)\b/i.test(raw)) return 'cancelled';
   if (/\b(?:dropped|abandoned|abandon(?:ed)?|stopped)\b/i.test(raw)) return 'dropped';
   if (/\b(?:hiatus|on hiatus|on hold|paused|pause|suspended)\b/i.test(raw)) return 'hiatus';
-  if (/\b(?:completed|complete|finished|ended|complete[d]?)\b/i.test(raw)) return 'completed';
+  if (/\b(?:completed|complete|finished|ended|complete[d]?|ende|abgeschlossen|beendet)\b/i.test(raw)) return 'completed';
   if (/\b(?:upcoming|not yet released|coming soon|announced|pre release|unreleased)\b/i.test(raw)) return 'upcoming';
-  if (/\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress)\b/i.test(raw)) return 'ongoing';
+  if (/\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress|laufend|fortlaufend|aktualisiert)\b/i.test(raw) || /\bfol\+/i.test(raw)) return 'ongoing';
   return 'unknown';
 }
 
@@ -788,6 +788,12 @@ class BrowserService {
       const cfg = ${payload};
       const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
       const abs = (value) => { try { return new URL(value, location.href); } catch { return null; } };
+      const host = String(location.hostname || '').toLowerCase();
+      const isToomics = host === 'toomics.com' || host.endsWith('.toomics.com');
+      // Toomics uses /webtoon/ for navigation and series. Only episode/toon/<id> is a title.
+      const toomicsSeriesPath = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/episode\/toon\/\d+(?:\/|$)/i;
+      const toomicsCatalogPath = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/ranking(?:\/|$)/i;
+      const toomicsListingPath = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/(?:recent|new_comics|search_v2)(?:\/|$)/i;
       const badPath = /\\/(?:chapter|chapters|chap|ch[-_\\/]?\\d|episode|episodes|login|logout|register|account|profile|privacy|terms|dmca|contact|search|tag|tags|genre|genres|category|categories|author|artist|bookmark|bookmarks|favorite|favorites|history|settings)(?:[\\/-]|$)/i;
       const seriesPath = /\\/(?:series|manga|manhwa|comic|comics|title|titles|webtoon|book|books|novel)(?:\\/|$)/i;
       const badText = /^(?:home|latest|updates?|new releases?|popular|search|login|register|sign in|sign up|privacy|terms|dmca|contact|discord|facebook|twitter|instagram|next|previous|prev|read now|bookmarks?|favorites?|history|settings)$/i;
@@ -800,6 +806,10 @@ class BrowserService {
       const sameOrigin = (u) => u && u.origin === location.origin;
       const canonical = (u) => {
         u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
+        if (isToomics) {
+          const match = u.pathname.match(/^(\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/episode\/toon\/\d+)/i);
+          if (match) { u.pathname = match[1]; u.search = ''; }
+        }
         return u.href.replace(/\\/$/, '');
       };
       const hasBadQuery = (u) => [...u.searchParams.keys()].some((key) => /^(?:genre|genres|category|categories|tag|tags|type|status|sort|filter|bookmark|bookmarks|favorite|favorites|search|q)$/i.test(key));
@@ -840,9 +850,9 @@ class BrowserService {
         if (/\\b(?:cancelled|canceled|discontinued)\\b/i.test(raw)) return 'cancelled';
         if (/\\b(?:dropped|abandoned)\\b/i.test(raw)) return 'dropped';
         if (/\\b(?:hiatus|on hiatus|paused|pause)\\b/i.test(raw)) return 'hiatus';
-        if (/\\b(?:completed|complete|finished|ended)\\b/i.test(raw)) return 'completed';
+        if (/\\b(?:completed|complete|finished|ended|ende|abgeschlossen|beendet)\\b/i.test(raw)) return 'completed';
         if (/\\b(?:upcoming|not yet released|coming soon|announced|pre[- ]?release)\\b/i.test(raw)) return 'upcoming';
-        if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization)\\b/i.test(raw)) return 'ongoing';
+        if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|laufend|fortlaufend|aktualisiert)\\b/i.test(raw) || /\\bfol\\+/i.test(raw)) return 'ongoing';
         return 'unknown';
       };
       const statusFor = (a) => {
@@ -990,19 +1000,21 @@ class BrowserService {
         if (navText.test(text)) cscore += 90;
         if (catalogPath.test(u.pathname) && depth <= 2) cscore += 45;
         if (/\\/(?:all|browse|directory|library|catalog)(?:\\/|$)/i.test(u.pathname)) cscore += 55;
+        if (isToomics && toomicsCatalogPath.test(u.pathname)) cscore += 220;
         if (navContext) cscore += 20;
         if (depth <= 2) cscore += 10;
-        if (badPath.test(u.pathname) || chapterText.test(text)) cscore = 0;
+        if (badPath.test(u.pathname) || chapterText.test(text) || (isToomics && toomicsListingPath.test(u.pathname))) cscore = 0;
         if (cscore >= 60 && key !== canonical(new URL(location.href))) {
           const old = catalogCandidates.get(key);
           if (!old || cscore > old.score) catalogCandidates.set(key, { url: key, text, score: cscore });
         }
 
-        if (u.pathname === '/' || badPath.test(u.pathname) || hasBadQuery(u)) continue;
+        if (u.pathname === '/' || (badPath.test(u.pathname) && !(isToomics && toomicsSeriesPath.test(u.pathname))) || hasBadQuery(u)) continue;
+        if (isToomics && !toomicsSeriesPath.test(u.pathname)) continue;
         const title = bestText(a);
         if (!title || badText.test(title) || navText.test(title) || chapterText.test(title)) continue;
         if (/^(?:read|view|more|details|continue)$/i.test(title)) continue;
-        const explicitSeriesPath = seriesPath.test(u.pathname);
+        const explicitSeriesPath = isToomics ? toomicsSeriesPath.test(u.pathname) : seriesPath.test(u.pathname);
         if (taxonomyText.test(title) && !explicitSeriesPath) continue;
 
         const heading = Boolean(a.querySelector('h1,h2,h3,h4') || cardRoot(a)?.querySelector('h1,h2,h3,h4'));
@@ -1750,7 +1762,7 @@ class BrowserService {
           if (/\\b(?:cancelled|canceled|discontinued|axed)\\b/i.test(raw)) return 'cancelled';
           if (/\\b(?:dropped|abandoned|stopped)\\b/i.test(raw)) return 'dropped';
           if (/\\b(?:hiatus|on hiatus|on hold|paused|pause|suspended)\\b/i.test(raw)) return 'hiatus';
-          if (/\\b(?:completed|complete|finished|ended)\\b/i.test(raw)) return 'completed';
+          if (/\\b(?:completed|complete|finished|ended|ende|abgeschlossen|beendet)\\b/i.test(raw)) return 'completed';
           if (/\\b(?:upcoming|not yet released|coming soon|announced|pre[- ]?release|unreleased)\\b/i.test(raw)) return 'upcoming';
           if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating)\\b/i.test(raw)) return 'ongoing';
           return 'unknown';
