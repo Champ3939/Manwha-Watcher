@@ -912,16 +912,31 @@ class BrowserService {
         return parts[parts.length - 1].split(/\\s+/)[0] || '';
       };
       const imageUrl = (img) => {
-        if (!img) return null;
-        const raw = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-lazy-src') ||
-          img.getAttribute('data-original') || img.getAttribute('data-url') || img.getAttribute('data-cfsrc') ||
-          fromSrcset(img.getAttribute('data-srcset') || img.getAttribute('srcset')) ||
-          fromSrcset(img.closest('picture')?.querySelector('source')?.getAttribute('srcset'));
-        const u = abs(raw);
-        if (!u || !/^https?:$/.test(u.protocol)) return null;
-        if (/transparent|placeholder|spacer|loading|blank\\.(?:gif|png)|1x1/i.test(u.href)) return null;
-        return u.href;
-      };
+  if (!img) return null;
+  // Lazy-load sites (notably Toomics) often keep a placeholder in currentSrc/src
+  // while the real cover lives in data-src/data-original/srcset. Try every
+  // candidate instead of stopping at the first truthy placeholder.
+  const candidates = [
+    img.currentSrc,
+    img.getAttribute('src'),
+    img.getAttribute('data-src'),
+    img.getAttribute('data-lazy-src'),
+    img.getAttribute('data-original'),
+    img.getAttribute('data-url'),
+    img.getAttribute('data-cfsrc'),
+    fromSrcset(img.getAttribute('data-srcset')),
+    fromSrcset(img.getAttribute('srcset')),
+    fromSrcset(img.closest('picture')?.querySelector('source')?.getAttribute('srcset')),
+    fromSrcset(img.closest('picture')?.querySelector('source')?.getAttribute('data-srcset'))
+  ].filter(Boolean);
+  for (const raw of candidates) {
+    const u = abs(raw);
+    if (!u || !/^https?:$/.test(u.protocol)) continue;
+    if (/transparent|placeholder|spacer|loading|blank\.(?:gif|png)|1x1/i.test(u.href)) continue;
+    return u.href;
+  }
+  return null;
+};
       const backgroundUrl = (el) => {
         if (!el) return null;
         const raw = el.style?.backgroundImage || getComputedStyle(el).backgroundImage || '';
@@ -1851,6 +1866,41 @@ class BrowserService {
           const item = { id, title: chapterTitle, url: href, number: Number.isFinite(number) ? number : null, downloaded: false, score, language: languageForNode(a) };
           if (!existing || item.score > existing.score || item.title.length < existing.title.length) rows.set(href, item);
         }
+        // Toomics renders episode rows through JavaScript and some variants do not
+  // expose the chapter URL as a normal <a href>. The canonical reader route
+  // is /<lang>/webtoon/detail/code/<code>/ep/<episode>/toon/<toonId>.
+  // Scan the serialized DOM too so data attributes / onclick markup are covered.
+  if (/^(?:www\.|global\.|comics\.)?toomics\.com$/i.test(location.hostname)) {
+    const toonMatch = location.pathname.match(/\/webtoon\/episode\/toon\/(\d+)/i);
+    const toonId = toonMatch?.[1] || null;
+    if (toonId) {
+      const markup = String(document.documentElement?.innerHTML || '')
+        .replace(/\\u002f/gi, '/')
+        .replace(/\\\//g, '/')
+        .replace(/&amp;/gi, '&');
+      const routeRx = /(?:https?:\/\/[^\s"'<>]+)?(\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?webtoon\/detail\/code\/(\d+)\/ep\/(\d+)\/toon\/(\d+))/gi;
+      let m;
+      while ((m = routeRx.exec(markup))) {
+        if (String(m[4]) !== String(toonId)) continue;
+        const number = Number(m[3]);
+        if (!Number.isFinite(number)) continue;
+        const href = abs(m[1]);
+        if (!href) continue;
+        const existing = rows.get(href);
+        const item = {
+          id: String(number),
+          title: 'Folge ' + number,
+          url: href,
+          number,
+          downloaded: false,
+          score: 180,
+          language: pageLanguage
+        };
+        if (!existing || item.score > existing.score) rows.set(href, item);
+      }
+    }
+  }
+
         let chapters = [...rows.values()];
         const numeric = chapters.filter((c) => Number.isFinite(c.number));
         if (numeric.length >= Math.max(3, Math.floor(chapters.length * 0.55))) {
