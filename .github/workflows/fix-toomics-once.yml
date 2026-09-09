@@ -25,74 +25,70 @@ jobs:
           import json
 
           p = Path('src/core/browserService.js')
-          s = p.read_text(encoding='utf-8')
+          lines = p.read_text(encoding='utf-8').splitlines(True)
+          snap = next(i for i, line in enumerate(lines) if 'async _snapshotCatalogPage' in line)
 
-          needle = "      const abs = (value) => { try { return new URL(value, location.href); } catch { return null; } };\n"
-          addition = """      const host = String(location.hostname || '').toLowerCase();
-          const isToomics = host === 'toomics.com' || host.endsWith('.toomics.com');
-          // Toomics uses /webtoon/ for both navigation/catalog pages and actual series.
-          // Only /webtoon/episode/toon/<id> is a real series detail URL.
-          const toomicsSeriesPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/episode\\/toon\\/\\d+(?:\\/|$)/i;
-          const toomicsCatalogPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/ranking(?:\\/|$)/i;
-          const toomicsListingPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/(?:recent|new_comics|search_v2)(?:\\/|$)/i;
-          """
-          if s.count(needle) < 1:
-              raise SystemExit('abs anchor not found')
-          # Apply only inside _snapshotCatalogPage (first matching abs line after that function begins).
-          snap = s.index('async _snapshotCatalogPage')
-          pos = s.index(needle, snap)
-          s = s[:pos] + needle + addition + s[pos + len(needle):]
+          # Insert Toomics URL rules in the catalog scanner.
+          abs_i = next(i for i in range(snap, len(lines)) if 'const abs = (value)' in lines[i])
+          toomics_rules = [
+              "      const host = String(location.hostname || '').toLowerCase();\n",
+              "      const isToomics = host === 'toomics.com' || host.endsWith('.toomics.com');\n",
+              "      // Toomics uses /webtoon/ for navigation and series. Only episode/toon/<id> is a title.\n",
+              "      const toomicsSeriesPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/episode\\/toon\\/\\d+(?:\\/|$)/i;\n",
+              "      const toomicsCatalogPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/ranking(?:\\/|$)/i;\n",
+              "      const toomicsListingPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/(?:recent|new_comics|search_v2)(?:\\/|$)/i;\n",
+          ]
+          lines[abs_i + 1:abs_i + 1] = toomics_rules
 
-          old = """      const canonical = (u) => {
-            u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
-            return u.href.replace(/\\/$/, '');
-          };"""
-          new = """      const canonical = (u) => {
-            u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
-            // Normalize Toomics popup/login variants to one stable title URL.
-            if (isToomics) {
-              const match = u.pathname.match(/^(\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/episode\\/toon\\/\\d+)/i);
-              if (match) { u.pathname = match[1]; u.search = ''; }
-            }
-            return u.href.replace(/\\/$/, '');
-          };"""
-          if old not in s:
-              raise SystemExit('canonical anchor not found')
-          s = s.replace(old, new, 1)
+          # Normalize series URL variants/query parameters before deduplication.
+          canonical_start = next(i for i in range(snap, len(lines)) if 'const canonical = (u) =>' in lines[i])
+          canonical_mutate = next(i for i in range(canonical_start, canonical_start + 8) if "u.hash = '';" in lines[i])
+          canonical_extra = [
+              "        if (isToomics) {\n",
+              "          const match = u.pathname.match(/^(\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/episode\\/toon\\/\\d+)/i);\n",
+              "          if (match) { u.pathname = match[1]; u.search = ''; }\n",
+              "        }\n",
+          ]
+          lines[canonical_mutate + 1:canonical_mutate + 1] = canonical_extra
 
-          needle = "        if (/\\/(?:all|browse|directory|library|catalog)(?:\\/|$)/i.test(u.pathname)) cscore += 55;\n"
-          if needle not in s:
-              raise SystemExit('catalog candidate anchor not found')
-          s = s.replace(needle, needle + "        if (isToomics && toomicsCatalogPath.test(u.pathname)) cscore += 220;\n", 1)
+          # Ranking is Toomics' actual catalog page.
+          cscore_i = next(i for i in range(snap, len(lines)) if "cscore += 55" in lines[i] and 'catalog' in lines[i])
+          lines[cscore_i + 1:cscore_i + 1] = ["        if (isToomics && toomicsCatalogPath.test(u.pathname)) cscore += 220;\n"]
 
-          old = "        if (badPath.test(u.pathname) || chapterText.test(text)) cscore = 0;"
-          new = "        if (badPath.test(u.pathname) || chapterText.test(text) || (isToomics && toomicsListingPath.test(u.pathname))) cscore = 0;"
-          if old not in s:
-              raise SystemExit('catalog exclusion anchor not found')
-          s = s.replace(old, new, 1)
+          # Do not propose Toomics recent/new/search listing pages as alternative catalogs.
+          exclusion_i = next(i for i in range(snap, len(lines)) if 'badPath.test(u.pathname) || chapterText.test(text)' in lines[i] and 'cscore = 0' in lines[i])
+          lines[exclusion_i] = "        if (badPath.test(u.pathname) || chapterText.test(text) || (isToomics && toomicsListingPath.test(u.pathname))) cscore = 0;\n"
 
-          needle = "        if (u.pathname === '/' || badPath.test(u.pathname) || hasBadQuery(u)) continue;\n"
-          if needle not in s:
-              raise SystemExit('series candidate anchor not found')
-          s = s.replace(needle, needle + "        if (isToomics && !toomicsSeriesPath.test(u.pathname)) continue;\n", 1)
+          # Important: generic badPath contains 'episode', but Toomics puts its SERIES page under /episode/toon/<id>.
+          candidate_i = next(i for i in range(snap, len(lines)) if "if (u.pathname === '/'" in lines[i] and 'hasBadQuery' in lines[i])
+          lines[candidate_i] = "        if (u.pathname === '/' || (badPath.test(u.pathname) && !(isToomics && toomicsSeriesPath.test(u.pathname))) || hasBadQuery(u)) continue;\n"
+          lines[candidate_i + 1:candidate_i + 1] = ["        if (isToomics && !toomicsSeriesPath.test(u.pathname)) continue;\n"]
 
-          old = "        const explicitSeriesPath = seriesPath.test(u.pathname);"
-          new = "        const explicitSeriesPath = isToomics ? toomicsSeriesPath.test(u.pathname) : seriesPath.test(u.pathname);"
-          if old not in s:
-              raise SystemExit('explicit series anchor not found')
-          s = s.replace(old, new, 1)
+          explicit_i = next(i for i in range(snap, len(lines)) if 'const explicitSeriesPath = seriesPath.test(u.pathname);' in lines[i])
+          lines[explicit_i] = "        const explicitSeriesPath = isToomics ? toomicsSeriesPath.test(u.pathname) : seriesPath.test(u.pathname);\n"
 
-          # German/Toomics status labels.
-          s = s.replace("if (/\\b(?:completed|complete|finished|ended|complete[d]?)\\b/i.test(raw)) return 'completed';",
-                        "if (/\\b(?:completed|complete|finished|ended|complete[d]?|ende|abgeschlossen|beendet)\\b/i.test(raw)) return 'completed';", 1)
-          s = s.replace("if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress)\\b/i.test(raw)) return 'ongoing';",
-                        "if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress|laufend|fortlaufend|aktualisiert)\\b/i.test(raw) || /\\bfol\\+/i.test(raw)) return 'ongoing';", 1)
-          s = s.replace("if (/\\\\b(?:completed|complete|finished|ended)\\\\b/i.test(raw)) return 'completed';",
-                        "if (/\\\\b(?:completed|complete|finished|ended|ende|abgeschlossen|beendet)\\\\b/i.test(raw)) return 'completed';")
-          s = s.replace("if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization)\\\\b/i.test(raw)) return 'ongoing';",
-                        "if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization|laufend|fortlaufend|aktualisiert)\\\\b/i.test(raw) || /\\\\bfol\\\\+/i.test(raw)) return 'ongoing';")
-          s = s.replace("if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating)\\\\b/i.test(raw)) return 'ongoing';",
-                        "if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|laufend|fortlaufend|aktualisiert)\\\\b/i.test(raw) || /\\\\bfol\\\\+/i.test(raw)) return 'ongoing';")
+          s = ''.join(lines)
+
+          # German status vocabulary used by Toomics.
+          s = s.replace(
+              "if (/\\b(?:completed|complete|finished|ended|complete[d]?)\\b/i.test(raw)) return 'completed';",
+              "if (/\\b(?:completed|complete|finished|ended|complete[d]?|ende|abgeschlossen|beendet)\\b/i.test(raw)) return 'completed';",
+              1
+          )
+          s = s.replace(
+              "if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress)\\b/i.test(raw)) return 'ongoing';",
+              "if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress|laufend|fortlaufend|aktualisiert)\\b/i.test(raw) || /\\bfol\\+/i.test(raw)) return 'ongoing';",
+              1
+          )
+          # Same mappings inside the injected renderer-side catalog scanner (escaped regex source).
+          s = s.replace(
+              "if (/\\\\b(?:completed|complete|finished|ended)\\\\b/i.test(raw)) return 'completed';",
+              "if (/\\\\b(?:completed|complete|finished|ended|ende|abgeschlossen|beendet)\\\\b/i.test(raw)) return 'completed';"
+          )
+          s = s.replace(
+              "if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization)\\\\b/i.test(raw)) return 'ongoing';",
+              "if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization|laufend|fortlaufend|aktualisiert)\\\\b/i.test(raw) || /\\\\bfol\\\\+/i.test(raw)) return 'ongoing';"
+          )
 
           p.write_text(s, encoding='utf-8')
 
@@ -101,7 +97,7 @@ jobs:
           data['version'] = '1.2.5'
           pkg.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
-          Path('RELEASE_NOTES_v1.2.5.md').write_text('''# Manhwa Watcher v1.2.5\n\n## Toomics catalog hotfix\n\n- Recognizes `/de/webtoon/ranking` as the Toomics series catalog.\n- Accepts only `/webtoon/episode/toon/<id>` as real Toomics series links.\n- Filters Toomics navigation entries such as Genres, My Library, New and Search from the series list.\n- Normalizes popup/login variants of the same Toomics title URL.\n- Adds German Toomics status hints such as `Ende`, `Abgeschlossen`, `Aktualisiert` and `Fol+`.\n''', encoding='utf-8')
+          Path('RELEASE_NOTES_v1.2.5.md').write_text('''# Manhwa Watcher v1.2.5\n\n## Toomics catalog hotfix\n\n- Uses `/de/webtoon/ranking` as the Toomics catalog.\n- Accepts only `/webtoon/episode/toon/<id>` as real Toomics series links.\n- Filters navigation entries such as Genres, My Library, New and Search from the series list.\n- Normalizes Toomics title URL variants before deduplication.\n- Recognizes German Toomics status hints such as `Ende`, `Abgeschlossen`, `Aktualisiert` and `Fol+`.\n''', encoding='utf-8')
           PY
 
           node --check src/core/browserService.js
