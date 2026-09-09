@@ -23,10 +23,10 @@ jobs:
           node --check src/main.js
           node --check src/preload.js
           node --check src/renderer/app.js
-          node -e "const fs=require('fs'); const s=fs.readFileSync('src/core/browserService.js','utf8'); const a=s.indexOf('async discoverSeriesInfo'); const m='const result = await win.webContents.executeJavaScript(`'; const b=s.indexOf(m,a)+m.length; const c=s.indexOf('`, true);',b); if(a<0||b<m.length||c<0) throw new Error('runtime script missing'); const raw=s.slice(b,c); const cooked=new Function('return `'+raw.replace(/`/g,'\\\\`')+'`;')(); new Function(cooked); console.log('discoverSeriesInfo runtime script OK');"
+          node tools/check_discover_runtime.js
           git config user.name "Champ3939"
           git config user.email "166837043+Champ3939@users.noreply.github.com"
           git add src/core/browserService.js src/main.js src/preload.js src/renderer/app.js package.json RELEASE_NOTES_v1.2.7.md
-          git rm tools/fix_v127.py .github/workflows/fix-toomics-runtime-once.yml
+          git rm tools/fix_v127.py tools/check_discover_runtime.js .github/workflows/fix-toomics-runtime-once.yml
           git commit -m "v1.2.7: Fix Toomics runtime chapters and covers"
           git push origin main
