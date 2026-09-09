@@ -27,79 +27,54 @@ jobs:
           p = Path('src/core/browserService.js')
           s = p.read_text(encoding='utf-8')
 
-          old = """      const clean = (value) => String(value || '').replace(/\\\\s+/g, ' ').trim();
-                const abs = (value) => { try { return new URL(value, location.href); } catch { return null; } };
-                const badPath = /\\\\/(?:chapter|chapters|chap|ch[-_\\\\/]?\\\\d|episode|episodes|login|logout|register|account|profile|privacy|terms|dmca|contact|search|tag|tags|genre|genres|category|categories|author|artist|bookmark|bookmarks|favorite|favorites|history|settings)(?:[\\\\/-]|$)/i;
-                const seriesPath = /\\\\/(?:series|manga|manhwa|comic|comics|title|titles|webtoon|book|books|novel)(?:\\\\/|$)/i;
-          """.replace('              ', '')
-          new = """      const clean = (value) => String(value || '').replace(/\\\\s+/g, ' ').trim();
-                const abs = (value) => { try { return new URL(value, location.href); } catch { return null; } };
-                const host = String(location.hostname || '').toLowerCase();
-                const isToomics = host === 'toomics.com' || host.endsWith('.toomics.com');
-                // Toomics uses /webtoon/ for both navigation/catalog pages and actual series.
-                // Only /webtoon/episode/toon/<id> is a real series detail URL.
-                const toomicsSeriesPath = /^\\\\/(?:[a-z]{2}(?:-[a-z]{2})?\\\\/)?webtoon\\\\/episode\\\\/toon\\\\/\\\\d+(?:\\\\/|$)/i;
-                const toomicsCatalogPath = /^\\\\/(?:[a-z]{2}(?:-[a-z]{2})?\\\\/)?webtoon\\\\/ranking(?:\\\\/|$)/i;
-                const toomicsListingPath = /^\\\\/(?:[a-z]{2}(?:-[a-z]{2})?\\\\/)?webtoon\\\\/(?:recent|new_comics|search_v2)(?:\\\\/|$)/i;
-                const badPath = /\\\\/(?:chapter|chapters|chap|ch[-_\\\\/]?\\\\d|episode|episodes|login|logout|register|account|profile|privacy|terms|dmca|contact|search|tag|tags|genre|genres|category|categories|author|artist|bookmark|bookmarks|favorite|favorites|history|settings)(?:[\\\\/-]|$)/i;
-                const seriesPath = /\\\\/(?:series|manga|manhwa|comic|comics|title|titles|webtoon|book|books|novel)(?:\\\\/|$)/i;
-          """.replace('              ', '')
-          if old not in s:
-              raise SystemExit('Toomics insertion anchor not found')
-          s = s.replace(old, new, 1)
+          needle = "      const abs = (value) => { try { return new URL(value, location.href); } catch { return null; } };\n"
+          addition = """      const host = String(location.hostname || '').toLowerCase();
+          const isToomics = host === 'toomics.com' || host.endsWith('.toomics.com');
+          // Toomics uses /webtoon/ for both navigation/catalog pages and actual series.
+          // Only /webtoon/episode/toon/<id> is a real series detail URL.
+          const toomicsSeriesPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/episode\\/toon\\/\\d+(?:\\/|$)/i;
+          const toomicsCatalogPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/ranking(?:\\/|$)/i;
+          const toomicsListingPath = /^\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/(?:recent|new_comics|search_v2)(?:\\/|$)/i;
+          """
+          if s.count(needle) < 1:
+              raise SystemExit('abs anchor not found')
+          # Apply only inside _snapshotCatalogPage (first matching abs line after that function begins).
+          snap = s.index('async _snapshotCatalogPage')
+          pos = s.index(needle, snap)
+          s = s[:pos] + needle + addition + s[pos + len(needle):]
 
           old = """      const canonical = (u) => {
-                u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
-                return u.href.replace(/\\\\/$/, '');
-              };
-          """.replace('              ', '')
+            u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
+            return u.href.replace(/\\/$/, '');
+          };"""
           new = """      const canonical = (u) => {
-                u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
-                // Normalize Toomics popup/login URL variants to one stable title URL.
-                if (isToomics) {
-                  const match = u.pathname.match(/^(\\\\/(?:[a-z]{2}(?:-[a-z]{2})?\\\\/)?webtoon\\\\/episode\\\\/toon\\\\/\\\\d+)/i);
-                  if (match) { u.pathname = match[1]; u.search = ''; }
-                }
-                return u.href.replace(/\\\\/$/, '');
-              };
-          """.replace('              ', '')
+            u.hash = ''; u.searchParams.delete('utm_source'); u.searchParams.delete('utm_medium'); u.searchParams.delete('utm_campaign');
+            // Normalize Toomics popup/login variants to one stable title URL.
+            if (isToomics) {
+              const match = u.pathname.match(/^(\\/(?:[a-z]{2}(?:-[a-z]{2})?\\/)?webtoon\\/episode\\/toon\\/\\d+)/i);
+              if (match) { u.pathname = match[1]; u.search = ''; }
+            }
+            return u.href.replace(/\\/$/, '');
+          };"""
           if old not in s:
               raise SystemExit('canonical anchor not found')
           s = s.replace(old, new, 1)
 
-          old = """        let cscore = 0;
-                  if (navText.test(text)) cscore += 90;
-                  if (catalogPath.test(u.pathname) && depth <= 2) cscore += 45;
-                  if (/\\\\/(?:all|browse|directory|library|catalog)(?:\\\\/|$)/i.test(u.pathname)) cscore += 55;
-                  if (navContext) cscore += 20;
-                  if (depth <= 2) cscore += 10;
-                  if (badPath.test(u.pathname) || chapterText.test(text)) cscore = 0;
-          """.replace('                ', '')
-          new = """        let cscore = 0;
-                  if (navText.test(text)) cscore += 90;
-                  if (catalogPath.test(u.pathname) && depth <= 2) cscore += 45;
-                  if (/\\\\/(?:all|browse|directory|library|catalog)(?:\\\\/|$)/i.test(u.pathname)) cscore += 55;
-                  // Toomics exposes its full title directory at /<lang>/webtoon/ranking.
-                  if (isToomics && toomicsCatalogPath.test(u.pathname)) cscore += 220;
-                  if (navContext) cscore += 20;
-                  if (depth <= 2) cscore += 10;
-                  if (badPath.test(u.pathname) || chapterText.test(text) || (isToomics && toomicsListingPath.test(u.pathname))) cscore = 0;
-          """.replace('                ', '')
+          needle = "        if (/\\/(?:all|browse|directory|library|catalog)(?:\\/|$)/i.test(u.pathname)) cscore += 55;\n"
+          if needle not in s:
+              raise SystemExit('catalog candidate anchor not found')
+          s = s.replace(needle, needle + "        if (isToomics && toomicsCatalogPath.test(u.pathname)) cscore += 220;\n", 1)
+
+          old = "        if (badPath.test(u.pathname) || chapterText.test(text)) cscore = 0;"
+          new = "        if (badPath.test(u.pathname) || chapterText.test(text) || (isToomics && toomicsListingPath.test(u.pathname))) cscore = 0;"
           if old not in s:
-              raise SystemExit('catalog score anchor not found')
+              raise SystemExit('catalog exclusion anchor not found')
           s = s.replace(old, new, 1)
 
-          old = """        if (u.pathname === '/' || badPath.test(u.pathname) || hasBadQuery(u)) continue;
-                  const title = bestText(a);
-          """.replace('                ', '')
-          new = """        if (u.pathname === '/' || badPath.test(u.pathname) || hasBadQuery(u)) continue;
-                  // Ranking/recent/new/search pages are navigation on Toomics, not titles.
-                  if (isToomics && !toomicsSeriesPath.test(u.pathname)) continue;
-                  const title = bestText(a);
-          """.replace('                ', '')
-          if old not in s:
-              raise SystemExit('series filter anchor not found')
-          s = s.replace(old, new, 1)
+          needle = "        if (u.pathname === '/' || badPath.test(u.pathname) || hasBadQuery(u)) continue;\n"
+          if needle not in s:
+              raise SystemExit('series candidate anchor not found')
+          s = s.replace(needle, needle + "        if (isToomics && !toomicsSeriesPath.test(u.pathname)) continue;\n", 1)
 
           old = "        const explicitSeriesPath = seriesPath.test(u.pathname);"
           new = "        const explicitSeriesPath = isToomics ? toomicsSeriesPath.test(u.pathname) : seriesPath.test(u.pathname);"
@@ -107,12 +82,11 @@ jobs:
               raise SystemExit('explicit series anchor not found')
           s = s.replace(old, new, 1)
 
-          # German/Toomics status labels used in cards and series pages.
+          # German/Toomics status labels.
           s = s.replace("if (/\\b(?:completed|complete|finished|ended|complete[d]?)\\b/i.test(raw)) return 'completed';",
                         "if (/\\b(?:completed|complete|finished|ended|complete[d]?|ende|abgeschlossen|beendet)\\b/i.test(raw)) return 'completed';", 1)
           s = s.replace("if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress)\\b/i.test(raw)) return 'ongoing';",
                         "if (/\\b(?:ongoing|on going|publishing|releasing|active|serialization|serializing|updating|update in progress|laufend|fortlaufend|aktualisiert)\\b/i.test(raw) || /\\bfol\\+/i.test(raw)) return 'ongoing';", 1)
-
           s = s.replace("if (/\\\\b(?:completed|complete|finished|ended)\\\\b/i.test(raw)) return 'completed';",
                         "if (/\\\\b(?:completed|complete|finished|ended|ende|abgeschlossen|beendet)\\\\b/i.test(raw)) return 'completed';")
           s = s.replace("if (/\\\\b(?:ongoing|on going|publishing|releasing|active|serialization)\\\\b/i.test(raw)) return 'ongoing';",
